@@ -155,6 +155,34 @@ static void test_initiator_restart_new_match(void) {
     CHECK(D.a.phase == GP_PICK && D.b.phase == GP_PICK && !D.b.me_picked);
 }
 
+// 'N' / 'O' 排满了也不丢:链路堵死、发送队列只剩两个空时回合打完('E'、最后的快照进去了,'O' 进不去),
+// 下一回合的 'N' 也进不去;通了以后被连方照样按顺序收到,没丢任何消息
+static void test_round_msgs_kept(void) {
+    start();
+    D.ab.cap = 0;   // 还连着,但一条也发不出去
+    while (D.a.out_n < FIGHT_OUTQ - 2) {   // 塞几条无害的 'H'(被连方收到不做事)
+        uint8_t i = (uint8_t)((D.a.out_head + D.a.out_n) % FIGHT_OUTQ);
+        D.a.out[i][0] = 'H';
+        D.a.out[i][1] = FIGHT_PROTO;
+        D.a.out_len[i] = 2;
+        D.a.out_n++;
+    }
+    D.a.sim.f[1].hp = 1;
+    press(0, FK_OK);
+    for (int t = 0; D.a.phase == GP_PLAY; t += 10) {
+        CHECK(t < 2000);
+        duo_step();
+    }
+    CHECK(D.a.phase == GP_END && D.b.phase == GP_PLAY);   // 被连方还不知道
+    CHECK(D.a.out_n == FIGHT_OUTQ && D.a.keep_n == 1 && D.a.dropped == 0);
+    run(FIGHT_NEXT_MS + 20);
+    CHECK(D.a.round == 2 && D.a.keep_n == 2 && D.a.dropped == 0 && D.b.phase == GP_PLAY);
+    D.ab.cap = 8;
+    run(500);
+    CHECK(D.b.phase == GP_COUNT && D.b.round == 2 && D.b.score_peer == 1 && D.a.keep_n == 0);
+    mirror();
+}
+
 static void test_bad_ver(void) {
     duo_init();
     duo_connect();
@@ -318,6 +346,7 @@ int main(void) {
     test_again();
     test_over_survives_reconnect();
     test_initiator_restart_new_match();
+    test_round_msgs_kept();
     test_bad_ver();
     test_garbage_ignored();
     printf("test_game: PASS\n");

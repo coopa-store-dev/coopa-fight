@@ -3,6 +3,7 @@
 #include <stdlib.h>
 
 #include "fight_moves.h"
+#include "fight_msg.h"
 
 #define CHECK(c) do { if (!(c)) { \
     printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #c); exit(1); } } while (0)
@@ -50,12 +51,18 @@ static void test_char_out_of_range(void) {
     CHECK(fight_char(255) == fight_char(FC_KID));
 }
 
+// 快照里血占 10 位:每个角色的满血都放得下
+static void test_hp_fits_snapshot(void) {
+    for (uint8_t c = 0; c < FC_COUNT; c++) CHECK(fight_char(c)->hp <= FIGHT_SNAP_HP_MAX);
+}
+
 int main(void) {
     test_all_moves_have_timing();
     test_combo_fits_kid();
     test_heavy_armor();
     test_super_dmg_third();
     test_char_out_of_range();
+    test_hp_fits_snapshot();
     printf("test_moves: PASS\n");
     return 0;
 }

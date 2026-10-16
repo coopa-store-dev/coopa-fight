@@ -114,6 +114,7 @@ void duo_step(void) {
     fight_game_tick(&D.a, 10);
     fight_game_tick(&D.b, 10);
     flow();
+    assert(D.a.dropped == 0 && D.b.dropped == 0);   // 排满丢消息:哪个测试里都不该有
 }
 
 void run(uint32_t ms) {

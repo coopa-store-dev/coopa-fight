@@ -25,6 +25,8 @@ uint32_t fight_get32(const uint8_t *p) {
 #define SH_T 32
 #define SH_LEFT 40
 
+_Static_assert(FIGHT_GAUGE_MAX <= 0xFFF, "gauge must fit the 12 snapshot bits");  // 快照里气占 12 位
+
 static uint64_t tens(uint32_t ms) { return ms / 10 > 255 ? 255 : ms / 10; }
 
 static uint16_t left_of(const fight_sim_t *s, const fight_fighter_t *f) {

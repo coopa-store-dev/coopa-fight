@@ -31,13 +31,19 @@
 // 节奏:
 // - 被连方的键:一串(和上一键隔 < FIGHT_BURST_MS)里第一下按到达时刻算,后面的按「上一下 + 间隔」排到那一刻喂给
 //   fight_sim_key_at;已经过了那一刻的(重发晚到)马上喂,late_ms = 晚了多少(封顶 FIGHT_LATE_MAX)。
+//   (下面「往前挪」以后排的时刻都不会晚于到达,实际上都是马上喂。)
 //   被连方最多 FIGHT_K_INFLIGHT 条 K 还没被快照的 ack 确认,再按的键排着,合并进下一条。
 // - 主动方自己的键延后 delay 再喂 f[0]:delay = 平滑来回的一半(新的一次占 1/4),限制在 30–150 ms,
 //   还没量到时 FIGHT_LOCAL_DELAY。'Q' 在开打以外(选人、倒数、回合之间)、链路静了 FIGHT_PING_QUIET 以后
 //   每 FIGHT_PING_MS 一次;开打时不 ping,因为 'Q' / 'A' 各占链路一片,会把快照和被连方的键挤后一个来回。
 // - 链路是停等的:一片的确认回来才发下一片,交出去太快就全排在链路里(快照越积越旧)。主动方每交出去一条,
-//   就估计链路要忙「平滑来回 × 9/8」;快照和 'Q' 只在估计空下来时交出去(快照有事件尽快,没事件约每 FIGHT_SNAP_MS),
-//   快照交出去的时候现打包,所以排着的旧快照不会堆在链路里。
+//   就估计链路要忙一片的时间(量到的平滑来回 × 9/8);快照和 'Q' 只在估计空下来时交出去(快照有事件尽快,
+//   没事件约每 FIGHT_SNAP_MS),快照交出去的时候现打包,所以排着的旧快照不会堆在链路里。
+//   回合里链路变慢了:send 被拒(链路排满)就把一片的估计加到 3/2(最多 FIGHT_BUSY_MAX)、快照停到排着的送完,
+//   之后很慢地收回;下次 ping 重新量。
+// - 被连方的键:一条 'K' 的最后一个键排在它到达以后,说明这一串开头那下晚到了,整条往前挪到最后一个 = 到达时刻
+//   (键不可能比它被发出去还晚按),免得一下卡顿拖慢这一串后面所有的键。
+// - 'N' / 'O' 排满了也不丢:先留着,有空再排。
 // - 断线:这一回合作废,比分和回合开始时的气留着;连回来主动方重开这一回合(判完了就开下一回合)。
 //   被连方重启过也没关系:'N' 里带着比分、气和角色。
 #pragma once
@@ -64,6 +70,9 @@
 #define FIGHT_MASH_MSG_MS 200    // 被连方晕着:最多这么久发一条 'M'
 #define FIGHT_K_INFLIGHT 4       // 被连方最多几条 'K' 没被快照确认(加上偶尔的 'M' / 'A',不超过链路的 8 条)
 #define FIGHT_NOCHAR 0xFF        // 还没选人 / 'P' 里的撤回
+#define FIGHT_LINK_Q 8           // kit_link 最多排几片(send 被拒 = 排满了)
+#define FIGHT_BUSY_MAX 600       // send 被拒(拥堵)后一片的估计最多加到这么久
+#define FIGHT_BUSY_RUN 64        // 连着交出去这么多条才把拥堵的估计往量到的来回收 1 ms
 #define FIGHT_OUTQ 8
 #define FIGHT_GEVQ 32
 #define FIGHT_KEYQ 32
@@ -95,8 +104,12 @@ typedef struct {
 
     uint8_t out[FIGHT_OUTQ][FIGHT_MSG_MAX];  // 排着要交给 send 的消息(快照、'K'、'Q' 不进这里:发的时候现打包)
     uint8_t out_len[FIGHT_OUTQ], out_head, out_n;
+    uint8_t keep[2][FIGHT_MSG_MAX], keep_len[2], keep_n;  // 排满时留着的 'N' / 'O'(不能丢)
+    uint16_t dropped;         // 排满丢掉的消息数(测试里应该一直是 0)
     uint32_t link_free;       // 估计链路什么时候空下来
     uint32_t hand_at;         // 最近一次交给 send 的时刻
+    uint16_t busy;            // 估计链路一片要多久(量到的来回 × 9/8,拥堵时加大);0 = 还没定
+    uint8_t busy_run;         // 连着交出去了几条(收回拥堵的估计用)
     bool snap_due;            // 主动方:有事件,快照尽快发
     uint32_t snap_at;         // 主动方:上一条快照交出去的时刻
 

@@ -26,20 +26,68 @@ static void sim_gev(fight_game_t *g, uint8_t kind, uint8_t who, uint8_t move) {
 // ---- 发送 ----
 
 static void enqueue(fight_game_t *g, const uint8_t *m, size_t len) {
-    if (!g->up || g->out_n == FIGHT_OUTQ) return;  // 满了(正常打不满):丢掉,断线重连时以主动方为准
+    if (!g->up) return;
+    if (g->out_n == FIGHT_OUTQ) {  // 满了(正常打不满):丢掉并记数,断线重连时以主动方为准
+        g->dropped++;
+        return;
+    }
     uint8_t i = (uint8_t)((g->out_head + g->out_n) % FIGHT_OUTQ);
     memcpy(g->out[i], m, len);
     g->out_len[i] = (uint8_t)len;
     g->out_n++;
 }
 
-// 交给 send。成功了就当链路又要忙一片的时间(停等:一片的确认回来才发下一片)。一片多久用平滑来回再多 1/8:
-// 量到的每一次都不会比那一片真用的短(排队只会更长),平均起来不会低估;多 1/8 免得正好卡在满负荷上越排越长。
+// 'N' / 'O' 不能丢(丢了被连方会停在回合结束):排满了就先留着,pump 腾出地方再排
+static void enqueue_keep(fight_game_t *g, const uint8_t *m, size_t len) {
+    if (!g->up) return;
+    if (g->out_n < FIGHT_OUTQ && !g->keep_n) {
+        enqueue(g, m, len);
+    } else if (g->keep_n < 2) {
+        memcpy(g->keep[g->keep_n], m, len);
+        g->keep_len[g->keep_n++] = (uint8_t)len;
+    } else {
+        g->dropped++;  // 一回合最多留着一条 'O' 一条 'N',到不了这里
+    }
+}
+
+static void flush_keep(fight_game_t *g) {
+    uint8_t i = 0;
+    for (; i < g->keep_n && g->out_n < FIGHT_OUTQ; i++) enqueue(g, g->keep[i], g->keep_len[i]);
+    g->keep_n = (uint8_t)(g->keep_n - i);
+    if (i && g->keep_n) {  // 只排进去了第一条:第二条挪到前面
+        memcpy(g->keep[0], g->keep[1], sizeof g->keep[0]);
+        g->keep_len[0] = g->keep_len[1];
+    }
+}
+
+// 链路一片要多久的基数:量到的平滑来回再多 1/8。量到的每一次都不会比那一片真用的短(排队只会更长),
+// 平均起来不会低估;多 1/8 免得正好卡在满负荷上越排越长。
+static uint16_t busy_base(const fight_game_t *g) {
+    return (uint16_t)(g->rtt_ok ? g->rtt + g->rtt / 8u : 2u * FIGHT_LOCAL_DELAY);
+}
+
+// 交给 send。成功了就当链路又要忙一片的时间(停等:一片的确认回来才发下一片)。
+// 回合里不 ping,链路变慢了量不到。send 被拒 = 链路里已经排满 FIGHT_LINK_Q 片(里面的快照都旧了):
+// 一片的估计加到 3/2(这一次拥堵只加一次),快照先停到排着的都送完;之后连着成功 FIGHT_BUSY_RUN 次
+// 才往量到的基数收回 1 ms(很慢:收快了又会排满),下次 ping 重新量。
 static bool hand(fight_game_t *g, const uint8_t *m, size_t n) {
-    if (!g->send(g->ctx, m, n)) return false;
+    if (!g->busy) g->busy = busy_base(g);
+    if (!g->send(g->ctx, m, n)) {
+        if (g->now >= g->link_free) {  // 新的一次拥堵(还在等排着的送完时再被拒不算)
+            uint32_t up = g->busy * 3u / 2u;
+            g->busy = (uint16_t)(up > FIGHT_BUSY_MAX ? FIGHT_BUSY_MAX : up);
+            g->link_free = g->now + (uint32_t)FIGHT_LINK_Q * g->busy;
+        }
+        g->busy_run = 0;
+        return false;
+    }
     g->hand_at = g->now;
     uint32_t from = g->link_free > g->now ? g->link_free : g->now;
-    g->link_free = from + (g->rtt_ok ? g->rtt + g->rtt / 8u : 2u * FIGHT_LOCAL_DELAY);
+    g->link_free = from + g->busy;
+    if (++g->busy_run >= FIGHT_BUSY_RUN) {
+        g->busy_run = 0;
+        if (g->busy > busy_base(g)) g->busy--;
+    }
     return true;
 }
 
@@ -55,6 +103,7 @@ static void rtt_sample(fight_game_t *g, uint32_t ms) {
     int32_t sample = ms > 2000 ? 2000 : (int32_t)ms;
     g->rtt = (uint16_t)(g->rtt_ok ? g->rtt + (sample - (int32_t)g->rtt) / 4 : sample);
     g->rtt_ok = true;
+    g->busy = busy_base(g);  // 量到新的了:拥堵的估计作废
     uint16_t d = g->rtt / 2;
     g->delay = d < FIGHT_DELAY_MIN ? FIGHT_DELAY_MIN : d > FIGHT_DELAY_MAX ? FIGHT_DELAY_MAX : d;
 }
@@ -76,9 +125,13 @@ static void send_keys(fight_game_t *g) {
 
 static void pump(fight_game_t *g) {
     if (!g->up) return;
-    while (g->out_n && hand(g, g->out[g->out_head], g->out_len[g->out_head])) {
-        g->out_head = (uint8_t)((g->out_head + 1) % FIGHT_OUTQ);
-        g->out_n--;
+    for (bool more = true; more;) {
+        while (g->out_n && hand(g, g->out[g->out_head], g->out_len[g->out_head])) {
+            g->out_head = (uint8_t)((g->out_head + 1) % FIGHT_OUTQ);
+            g->out_n--;
+        }
+        more = g->keep_n && g->out_n < FIGHT_OUTQ;
+        flush_keep(g);
     }
     if (g->out_n) return;  // 链路排满了:下一帧再发
     if (!g->initiator) {
@@ -127,7 +180,7 @@ static void send_round(fight_game_t *g, uint8_t round) {
     m[9] = g->peer_char;
     fight_put16(m + 10, g->gauge[0]);
     fight_put16(m + 12, g->gauge[1]);
-    enqueue(g, m, sizeof m);
+    enqueue_keep(g, m, sizeof m);
 }
 
 static void clear_keys(fight_game_t *g) {
@@ -235,7 +288,7 @@ static void round_over(fight_game_t *g) {
     m[6] = w;
     m[7] = g->score_me;
     m[8] = g->score_peer;
-    enqueue(g, m, sizeof m);
+    enqueue_keep(g, m, sizeof m);
     g->phase = GP_END;
     g->phase_ms = FIGHT_NEXT_MS;
     gev(g, GE_ROUND_END, NULL);
@@ -287,13 +340,25 @@ static void on_keys(fight_game_t *g, const uint8_t *m, size_t n) {
     bool cont = seq == (uint8_t)(g->rx_seq + 1);  // 接得上:第一个键的间隔是对着上一条最后一个键的
     g->rx_seq = seq;
     if (g->phase != GP_PLAY) return;
+    uint32_t at[FIGHT_K_MAX], prev = g->rx_last;
     for (uint8_t i = 0; i < k; i++) {
-        uint32_t gap = p[i].gap * 10u, at;
-        if ((i == 0 && !cont) || gap >= FIGHT_BURST_MS) at = g->now > g->rx_last ? g->now : g->rx_last;  // 新的一串
-        else at = g->rx_last + gap;
-        g->rx_last = at;
-        push_key(g->remote, &g->remote_n, p[i].key, at);
+        uint32_t gap = p[i].gap * 10u;
+        if ((i == 0 && !cont) || gap >= FIGHT_BURST_MS) at[i] = g->now > prev ? g->now : prev;  // 新的一串
+        else at[i] = prev + gap;
+        prev = at[i];
     }
+    // 一条 'K' 里的键都是发出去之前按的,不可能比它到得还晚:最后一个排在到达以后,说明这一串开头那下晚到了
+    // (后面的都跟着晚)。整条往前挪到最后一个 = 现在,不早于上一条最后一个键。
+    if (at[k - 1] > g->now) {
+        uint32_t shift = at[k - 1] - g->now;
+        for (uint8_t i = 0; i < k; i++) {
+            at[i] = at[i] > shift ? at[i] - shift : 0;
+            uint32_t floor = i ? at[i - 1] : g->rx_last;
+            if (at[i] < floor) at[i] = floor;
+        }
+    }
+    for (uint8_t i = 0; i < k; i++) push_key(g->remote, &g->remote_n, p[i].key, at[i]);
+    g->rx_last = at[k - 1];
     feed(g, g->remote, &g->remote_n, 1);
     sim_events(g);
 }
@@ -542,6 +607,7 @@ static void clear_link(fight_game_t *g) {
     if (g->phase != GP_OVER) g->phase = GP_WAIT;
     g->me_again = g->peer_again = false;
     g->out_n = g->out_head = 0;
+    g->keep_n = 0;
     clear_keys(g);
     g->snap_ok = false;
 }
@@ -559,6 +625,8 @@ void fight_game_connected(fight_game_t *g, bool initiator) {
     g->ping_wait = false;
     g->ping_next = g->now;
     g->rtt_ok = false;
+    g->busy = 0;
+    g->busy_run = 0;
     g->delay = FIGHT_LOCAL_DELAY;
     uint8_t m[2] = { 'H', FIGHT_PROTO };
     enqueue(g, m, sizeof m);

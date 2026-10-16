@@ -9,6 +9,7 @@
 #include "fight_sim.h"
 
 #define FIGHT_SNAP_LEN 16
+#define FIGHT_SNAP_HP_MAX 1023   // 快照里血占 10 位:每个角色的满血都不能超过它(test_moves 里查)
 #define FIGHT_K_MAX 7     // 一条 K 最多装几个键
 #define FIGHT_K_GAP_MAX 255  // K 里「距上一键几个 10 ms」封顶
 

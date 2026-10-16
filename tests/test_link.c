@@ -394,6 +394,101 @@ static void test_snapshot_no_backlog(void) {
     CHECK(worst <= 300);
 }
 
+// ---- 回合里链路变慢 ----
+
+// 主动方规则里出了 kind(who),到被连方那边出同一个事件:隔了多久
+static uint32_t e_latency(uint8_t kind, int who) {
+    int32_t at_a = -1;
+    for (uint32_t t = 0; t < 3000; t += 10) {
+        duo_step();
+        uint8_t e;
+        fight_ev_t se;
+        while (fight_game_event(&D.a, &e, &se))
+            if (e == GE_SIM && se.kind == kind && se.who == who && at_a < 0) at_a = (int32_t)D.now;
+        while (fight_game_event(&D.b, &e, &se))
+            if (e == GE_SIM && se.kind == kind && se.who == who && at_a >= 0) return D.now - (uint32_t)at_a;
+    }
+    CHECK(0);
+    return 0;
+}
+
+// 回合开始时量到的来回是 70 ms 单程的;1 秒后链路变慢(variant 0:单程 110 ms;variant 1:每 2 秒卡 400 ms)。
+// 回合里不 ping,只能靠 send 被拒知道拥堵:等它稳下来以后,快照不能越积越旧(variant 0 每一步都算;
+// variant 1 卡的那 400 ms 本身就超过界线,按每条快照到的时候算),大招、KO 的 'E' 照样及时到。
+static void slow_round(int variant) {
+    begin_as(FC_KID, FC_DAD, 70, 0);   // 不按键:这一回合 60 秒内打不完
+    run(1000);
+    if (variant == 0) duo_delay(110, 0);
+    uint32_t worst = 0, worst_arrive = 0;
+    // 稳下来要多久:拥堵只能从「链路排满、send 被拒」知道;每 2 秒卡一下时链路一次多排一点,十几秒才排满
+    for (uint32_t t = 0; t < 40000; t += 10) {
+        if (variant == 1 && t % 2000 == 0) duo_stall(&D.ab);
+        uint32_t nf = D.ab.msgs['F'];
+        duo_step();
+        drain_events();
+        CHECK(D.a.phase == GP_PLAY && D.b.phase == GP_PLAY);
+        if (t < 30000) continue;   // 稳下来(每 2 秒卡一下时约 25 秒才第一次排满、被拒)
+        uint32_t lag = D.a.sim.clock - D.b.snap.clock;
+        if (lag > worst) worst = lag;
+        if (D.ab.msgs['F'] != nf && lag > worst_arrive) worst_arrive = lag;
+    }
+    // 大招(避开卡顿那一刻):主动方 ● ▼ ●
+    while (variant == 1 && D.now % 2000 != 1000) duo_step();
+    D.a.sim.f[0].gauge = FIGHT_GAUGE_BAR;
+    drain_events();
+    press(0, FK_OK);
+    run(100);
+    press(0, FK_DOWN);
+    run(100);
+    press(0, FK_OK);
+    uint32_t e_super = e_latency(FE_SUPER, 0);
+    const fight_fighter_t *v = &D.a.sim.f[1];
+    while (v->st != FS_IDLE || v->protect || v->eat_keys) duo_step();   // 晕完、醒了、保护没了
+    while (variant == 1 && D.now % 2000 != 1000) duo_step();
+    D.a.sim.f[1].hp = 1;
+    drain_events();
+    press(0, FK_OK);
+    uint32_t e_ko = e_latency(FE_KO, 1);
+    printf("test_slowdown %d: worst lag %u ms (on arrival %u), super E %u ms, KO E %u ms, refused %u\n", variant,
+           (unsigned)worst, (unsigned)worst_arrive, (unsigned)e_super, (unsigned)e_ko, (unsigned)D.ab.refused);
+    CHECK((variant == 0 ? worst : worst_arrive) <= 500 && e_super <= 500 && e_ko <= 500);
+}
+
+static void test_slowdown(void) {
+    slow_round(0);
+    slow_round(1);
+}
+
+// 一串的第一下卡了 400 ms:后面的键不能都跟着晚 400 ms(往前挪),卡过以后照链路的延迟生效
+static void test_burst_reanchor(void) {
+    begin_as(FC_KID, FC_DAD, 70, 0);
+    run(1000);
+    drain_events();
+    uint32_t pressed[12], n = 0, starts = 0, worst = 0;
+    press(1, FK_OK);
+    pressed[n++] = D.now;
+    duo_stall(&D.ba);   // 第一下那一片卡 400 ms
+    for (uint32_t t = 10; n < 12 || t < 12 * 600 + 500; t += 10) {
+        if (t % 600 == 0 && n < 12) {   // 隔 0.6 秒一下(一串,不断开),每下都是从站着出的一拳
+            press(1, FK_OK);
+            pressed[n++] = D.now;
+        }
+        duo_step();
+        uint8_t e;
+        fight_ev_t se;
+        while (fight_game_event(&D.a, &e, &se)) {
+            if (e != GE_SIM || se.kind != FE_START || se.who != 1) continue;
+            CHECK(starts < n);
+            uint32_t lat = D.now - pressed[starts];
+            if (starts >= 3 && lat > worst) worst = lat;   // 卡过以后
+            starts++;
+        }
+        drain_events();
+    }
+    printf("test_burst_reanchor: worst key latency after the stall %u ms\n", (unsigned)worst);
+    CHECK(starts == 12 && worst <= 150);
+}
+
 int main(void) {
     test_mirror();
     test_predict();
@@ -406,6 +501,8 @@ int main(void) {
     test_remote_super_survives_stall();
     test_remote_super_fair();
     test_snapshot_no_backlog();
+    test_slowdown();
+    test_burst_reanchor();
     printf("test_link: PASS\n");
     return 0;
 }
