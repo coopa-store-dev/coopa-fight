@@ -43,7 +43,7 @@ $(OUT)/test_local: test_local.c ../src/fight_local.c ../src/fight_bot.c ../src/f
 	$(CC) $(CFLAGS) $(filter %.c,$^) -o $@
 
 # Mac 冒充对手的 C 接口:peer_glue.c 自己包含了其余的规则源文件(link_peer.py 只编 fight_game.c 和它)
-$(OUT)/test_peer_glue: test_peer_glue.c peer_glue.c duo.c ../src/fight_game.c $(HDRS) | $(OUT)
+$(OUT)/test_peer_glue: test_peer_glue.c peer_glue.c duo.c ../src/fight_game.c ../src/fight_bot.c ../src/fight_moves.c ../src/fight_msg.c ../src/fight_sim.c $(HDRS) | $(OUT)
 	$(CC) $(CFLAGS) $(filter %.c,$^) -o $@
 
 $(OUT)/test_save: test_save.c ../src/fight_save.c $(HDRS) | $(OUT)
