@@ -29,18 +29,25 @@ static void run_to(uint32_t clock) { while (S.clock < clock && S.winner == FIGHT
 static void key(int who, uint8_t k) { fight_sim_key(&S, (uint8_t)who, k); }
 static int hp_max(int who) { return fight_char(S.f[who].ch)->hp; }
 
-// 奶奶提前按 ● ▼ ● 打库巴放大招,跑完特写:返回库巴开始晕的 clock(200)
-static uint32_t super_dizzy(uint16_t g0) {
-    start(FC_GRANNY, FC_KID, g0, 0);
+// c0 提前按 ● ▼ ● 打 c1 放大招,跑完特写:返回 c1 开始晕的 clock
+static uint32_t super_dizzy_as(uint8_t c0, uint8_t c1, uint16_t g0) {
+    start(c0, c1, g0, 0);
     key(0, FK_OK);
-    run_to(60);
+    run_to(50);
     key(0, FK_DOWN);
-    run_to(120);
+    run_to(100);
     key(0, FK_OK);
-    run_to(200);
+    while (!S.freeze) fight_sim_step(&S);
     while (S.freeze) fight_sim_step(&S);
-    CHECK(S.f[1].st == FS_DIZZY && S.clock == 200);
+    CHECK(S.f[1].st == FS_DIZZY && ev(FE_SUPER) == 1);
     return S.clock;
+}
+
+// 奶奶打库巴:200 打到、放大招
+static uint32_t super_dizzy(uint16_t g0) {
+    uint32_t d = super_dizzy_as(FC_GRANNY, FC_KID, g0);
+    CHECK(d == 200);
+    return d;
 }
 
 // 不按,晕到自己醒:返回醒的 clock
@@ -296,6 +303,67 @@ static void test_wake_timing_loop(void) {
     CHECK(ev(FE_SUPER) == 1 && ev(FE_DIZZY) == 1);
     CHECK(S.f[1].hp == hp - 40 - 40 - 70 && !S.f[1].protect);
     CHECK(S.f[0].gauge >= FIGHT_GAUGE_BAR);   // 有气也没出
+
+    // 起手在 0.3 秒里出的(醒后 110 ms),打到时(310)保护已经没了:这套连招仍然不能有大招
+    super_dizzy(2000);
+    w = wake_natural();
+    run_to(w + 110);
+    key(0, FK_OK);
+    run_to(w + 310);
+    CHECK(S.f[1].st == FS_HITSTUN && !S.f[1].protect && S.f[0].chain == 1);
+    run_to(w + 320);
+    key(0, FK_DOWN);
+    run_to(w + 400);
+    key(0, FK_OK);
+    run_to(w + 3000);
+    CHECK(ev(FE_SUPER) == 1 && ev(FE_DIZZY) == 1 && S.f[1].hp == hp - 40 - 40);
+
+    // 库巴弹弓起手(醒后 110 ms 出、510 打到,开连招):同样不能有大招
+    super_dizzy_as(FC_KID, FC_DAD, 2000);
+    w = wake_natural();
+    int dad_hp = S.f[1].hp;
+    run_to(w + 60);
+    key(0, FK_DOWN);
+    run_to(w + 110);
+    key(0, FK_UP);
+    CHECK(S.f[0].move == FM_SPECIAL);
+    run_to(w + 510);
+    CHECK(S.f[0].chain == 1 && S.f[0].chain_open && !S.f[1].protect);
+    run_to(w + 600);
+    key(0, FK_DOWN);
+    run_to(w + 650);
+    key(0, FK_OK);
+    run_to(w + 3000);
+    CHECK(ev(FE_SUPER) == 1 && ev(FE_DIZZY) == 1 && S.f[1].hp == dad_hp - 60 - 40);
+
+    // 起手在保护消失以后才出(醒后 300 ms):正常的连招,● ▼ ● 能出大招
+    super_dizzy(2000);
+    w = wake_natural();
+    run_to(w + 300);
+    CHECK(!S.f[1].protect);
+    key(0, FK_OK);
+    run_to(w + 500);
+    CHECK(S.f[0].chain == 1);
+    key(0, FK_DOWN);
+    run_to(w + 560);
+    key(0, FK_OK);
+    CHECK(ev_by(FE_SUPER, 0) == 2);
+}
+
+// 审核的复现:晕着被打醒的这一套,对方缓过来后晚到的 ▼ ●(本来在窗口里按的)也不能是大招
+static void test_late_keys_after_wake_hit(void) {
+    uint32_t d = super_dizzy(2000);
+    key(0, FK_OK);
+    run_to(d + 200);
+    CHECK(S.f[1].st == FS_HITSTUN && S.f[0].chain_until == d + 800);
+    run_to(d + 990);
+    CHECK(S.f[1].st == FS_IDLE && !S.f[1].protect);
+    fight_sim_key_at(&S, 0, FK_DOWN, 320);   // 本来 d + 670
+    fight_sim_key_at(&S, 0, FK_OK, 290);     // 本来 d + 700
+    CHECK(ev(FE_SUPER) == 1 && S.f[0].move == FM_JAB2 && S.f[1].st == FS_HITSTUN);   // 只出拳(照样拉回僵直)
+    run_to(d + 3000);
+    CHECK(ev(FE_SUPER) == 1 && ev(FE_DIZZY) == 1);
+    CHECK(S.f[1].hp == hp_max(1) - 40 - 330 - 40 - 40);
 }
 
 // 自己醒、过了 0.3 秒回到能动:保护消失,下一次 ● ▼ ● 能出
@@ -589,6 +657,7 @@ int main(void) {
     test_no_super_on_dizzy_combo();
     test_no_super_after_break();
     test_wake_timing_loop();
+    test_late_keys_after_wake_hit();
     test_protect_clears();
     test_wake_keys_eaten();
     test_trade_no_super();

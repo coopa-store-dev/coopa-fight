@@ -62,6 +62,7 @@ typedef struct {
     uint8_t chain;       // 这套连招打中了几下(0 = 不在连招里)
     bool chain_open;     // 对方正僵着,下一个键接连招
     uint32_t chain_until; // 连招窗口在这个 clock 关(对方僵到这一刻);晚到的键按本来按下的时刻和它比。0 = 没有窗口
+    bool chain_nosuper;  // 这一套连招不能有大招:起手出的时候、或者这一套哪一下打到的时候对方在保护里
     uint32_t down_at;    // 最近一次按 ▼ 的 clock(前缀);UINT32_MAX = 这回合还没按过
     bool down_last;      // 上一个按下的键是 ▼(前缀只管紧跟在它后面的那一个键)
     bool long_guard;     // ▼ 长按撑起来的盾还在

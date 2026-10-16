@@ -150,6 +150,7 @@ static void start_special(fight_sim_t *s, uint8_t who, bool in_chain) {
     f->special_cool = FIGHT_SPECIAL_COOL;
     if (f->ch == FC_GRANDPA) {
         end_chain(f);
+        f->chain_nosuper = s->f[!who].protect;  // 架势是新的起手(接住后才开连招)
         enter(f, FS_STANCE, FIGHT_STANCE_MS);
         f->move = FM_SPECIAL;
         event(s, FE_START, who, FM_SPECIAL);
@@ -197,7 +198,7 @@ static bool chain_ok(const fight_fighter_t *f, uint32_t te) {
 // 不在连招里的一个键(f 在 FS_IDLE 或 FS_GUARD)
 static void apply_key(fight_sim_t *s, uint8_t who, uint8_t e) {
     fight_fighter_t *f = &s->f[who];
-    uint8_t key = e & (uint8_t)~FIGHT_Q_PREFIX;
+    uint8_t key = qkey(e);
     if (key == FK_DOWN) {
         if (f->st == FS_GUARD || f->guard_cool) return;  // 举着不重新举;冷却里丢掉
         end_chain(f);
@@ -205,6 +206,7 @@ static void apply_key(fight_sim_t *s, uint8_t who, uint8_t e) {
         return;
     }
     end_chain(f);
+    f->chain_nosuper = s->f[!who].protect;  // 起手:对方这时在保护里,这一套就不能有大招
     if (key == FK_UP && (e & FIGHT_Q_PREFIX)) {  // ▼ ▲ 小招;冷却里 ▲ 不出
         if (!f->special_cool) start_special(s, who, false);
         return;
@@ -220,13 +222,13 @@ static void drain_idle(fight_sim_t *s, uint8_t who) {
 static uint8_t next_jab(const fight_fighter_t *f) { return f->chain >= 2 ? FM_JAB3 : FM_JAB2; }
 
 // 连招里 ▼ 后面跟着前缀里的 ● / ▲(▼ 已经拿掉,这里拿掉跟着的那个键):
-//   ▼ ● → 大招(有气、对方不在保护里);对方在保护里只出拳;没气就是举盾、一拳。
+//   ▼ ● → 大招(有气、这一套不是对着保护里的人打的、● 也不是对着保护按的);不能大招就只出拳;没气就是举盾、一拳。
 //   ▼ ▲ → 小招连上;小招冷却里 ▼ 只管举盾、▲ 不出。
 static void chain_after_down(fight_sim_t *s, uint8_t who) {
     fight_fighter_t *f = &s->f[who];
     uint8_t e = pop(f);
-    bool protect = s->f[!who].protect || (e & FIGHT_Q_NOSUPER);
-    if (qkey(e) == FK_OK && protect) {
+    bool nosuper = f->chain_nosuper || (e & FIGHT_Q_NOSUPER);
+    if (qkey(e) == FK_OK && nosuper) {
         start_chain(s, who, next_jab(f));
     } else if (qkey(e) == FK_OK && f->gauge >= FIGHT_GAUGE_BAR) {
         start_super(s, who);
@@ -275,6 +277,7 @@ static void open_chain(fight_sim_t *s, fight_fighter_t *f, uint8_t chain, uint16
 // 第三拳、连段重击、连招里的小招收尾;别的招不开连招。
 static void landed(fight_sim_t *s, uint8_t who, uint16_t hitstun) {
     fight_fighter_t *f = &s->f[who];
+    if (s->f[!who].protect) f->chain_nosuper = true;  // 打到保护里的人(比如晕着打醒):这一套不能有大招
     switch (f->move) {
     case FM_JAB:
     case FM_JAB2:
@@ -308,6 +311,7 @@ static void counter(fight_sim_t *s, uint8_t who) {
     stun(a, d->hitstun);
     a->hit2_left = 0;  // 锅盖被接住了,不再飞回来
     enter(g, FS_IDLE, 0);
+    if (a->protect) g->chain_nosuper = true;
     open_chain(s, g, 1, d->hitstun);
 }
 
