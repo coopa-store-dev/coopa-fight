@@ -35,7 +35,7 @@
 #define FIGHT_UNDECIDED 2     // winner:还没分出
 #define FIGHT_DRAW 3          // winner:平
 #define FIGHT_Q_PREFIX 0x80   // queue 里的 ● / ▲:紧跟在 ▼ 后面、FIGHT_PREFIX_MS 内按的(或 ▼ 长按撑着盾时按的 ▲)
-#define FIGHT_Q_NOSUPER 0x40  // queue 里带前缀的 ●:按的时候对方在保护里,▼ ● 只出拳
+#define FIGHT_Q_NOSUPER 0x40  // queue 里的 ● / ▲:按的时候(按本来的时刻)对方在保护里:▼ ● 只出拳,拿它起手的这一套不能有大招
 #define FIGHT_SUPER_FREEZE 1500
 #define FIGHT_DIZZY_SUPER 2000
 #define FIGHT_DIZZY_BREAK 1000
@@ -64,12 +64,14 @@ typedef struct {
     uint32_t chain_until; // 连招窗口在这个 clock 关(对方僵到这一刻);晚到的键按本来按下的时刻和它比。0 = 没有窗口
     bool chain_nosuper;  // 这一套连招不能有大招:起手出的时候、或者这一套哪一下打到的时候对方在保护里
     uint32_t down_at;    // 最近一次按 ▼ 的 clock(前缀);UINT32_MAX = 这回合还没按过
+    uint16_t down_grace; // 这次 ▼ 晚到了(联机补算)= FIGHT_LATE_MAX,本地 0:连招里排着等下一个键时,按真时钟多等这么久
     bool down_last;      // 上一个按下的键是 ▼(前缀只管紧跟在它后面的那一个键)
     bool long_guard;     // ▼ 长按撑起来的盾还在
     bool protect;        // 保护:被打晕起,到醒后第一次能动且没在挨打为止(不再晕、不吃大招)
+    uint32_t protect_end; // 最近一次保护消失的 clock(0 = 这回合还没有过):晚到的起手按本来的时刻和它比
     uint16_t special_cool; // 小招冷却(小招出完才开始减)
     uint16_t eat_keys;   // 刚醒:还剩多久不收键、也不挨打
-    uint8_t queue[4];    // 提前按的键(出招还没打到时按的):fight_key_t,● / ▲ 可能带 FIGHT_Q_PREFIX(● 还可能带 FIGHT_Q_NOSUPER)
+    uint8_t queue[4];    // 提前按的键(出招还没打到时按的):fight_key_t,● / ▲ 可能带 FIGHT_Q_PREFIX、FIGHT_Q_NOSUPER
     uint8_t qn;
     uint16_t guard_cool;
     uint16_t mash_left;  // 晕:还剩多久(狂按减)
@@ -103,8 +105,9 @@ typedef struct {
 } fight_sim_t;
 void fight_sim_init(fight_sim_t *s, uint8_t ch0, uint8_t ch1, uint16_t gauge0, uint16_t gauge1);
 void fight_sim_key(fight_sim_t *s, uint8_t who, uint8_t key);   // fight_key_t
-// 这个键其实是 late_ms 之前按的(本地 0;联机补算,封顶 FIGHT_LATE_MAX):▼ 前缀和连招窗口按 clock − late_ms 判,
-// 动作从现在开始。
+// 这个键其实是 late_ms 之前按的(本地 0;联机补算,封顶 FIGHT_LATE_MAX):▼ 前缀、连招窗口、起手时对方在不在保护里
+// 按 clock − late_ms 判,动作从现在开始。晚到的 ▼ 在连招里等下一个键时,按真时钟多等 FIGHT_LATE_MAX
+// (下一个键也晚到,排在它后面常常更晚)。
 void fight_sim_key_at(fight_sim_t *s, uint8_t who, uint8_t key, uint16_t late_ms);
 void fight_sim_step(fight_sim_t *s);                            // 推 FIGHT_STEP 毫秒
 bool fight_sim_event(fight_sim_t *s, fight_ev_t *out);          // 取一条事件,没有返回 false

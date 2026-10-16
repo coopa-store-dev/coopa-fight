@@ -145,12 +145,13 @@ static void start_chain(fight_sim_t *s, uint8_t who, uint8_t m) {
 }
 
 // 小招。爷爷的太极是架势(FS_STANCE),连招里出也一样(不连上,等对方打过来)。
-static void start_special(fight_sim_t *s, uint8_t who, bool in_chain) {
+// nosuper = 拿它起手的这一套不能有大招(对方在保护里、或者按的时候在保护里)。
+static void start_special(fight_sim_t *s, uint8_t who, bool in_chain, bool nosuper) {
     fight_fighter_t *f = &s->f[who];
     f->special_cool = FIGHT_SPECIAL_COOL;
     if (f->ch == FC_GRANDPA) {
         end_chain(f);
-        f->chain_nosuper = s->f[!who].protect;  // 架势是新的起手(接住后才开连招)
+        f->chain_nosuper = nosuper;  // 架势是新的起手(接住后才开连招)
         enter(f, FS_STANCE, FIGHT_STANCE_MS);
         f->move = FM_SPECIAL;
         event(s, FE_START, who, FM_SPECIAL);
@@ -206,9 +207,10 @@ static void apply_key(fight_sim_t *s, uint8_t who, uint8_t e) {
         return;
     }
     end_chain(f);
-    f->chain_nosuper = s->f[!who].protect;  // 起手:对方这时在保护里,这一套就不能有大招
+    // 起手:对方这时在保护里、或者按的时候(本来的时刻)在保护里,这一套就不能有大招
+    f->chain_nosuper = s->f[!who].protect || (e & FIGHT_Q_NOSUPER);
     if (key == FK_UP && (e & FIGHT_Q_PREFIX)) {  // ▼ ▲ 小招;冷却里 ▲ 不出
-        if (!f->special_cool) start_special(s, who, false);
+        if (!f->special_cool) start_special(s, who, false, f->chain_nosuper);
         return;
     }
     start_move(s, who, key == FK_UP ? FM_HEAVY : FM_JAB);
@@ -220,6 +222,13 @@ static void drain_idle(fight_sim_t *s, uint8_t who) {
 }
 
 static uint8_t next_jab(const fight_fighter_t *f) { return f->chain >= 2 ? FM_JAB3 : FM_JAB2; }
+
+// 连招里只排着一个 ▼,还在等后面前缀里的 ● / ▲:按 ▼ 后 FIGHT_PREFIX_MS 内、连招窗口没关。
+// 晚到的 ▼(联机补算)两个期限都按真时钟多等 FIGHT_LATE_MAX:同一串里的下一个键也晚到,而且排在它后面,常常更晚。
+static bool down_waits(const fight_sim_t *s, const fight_fighter_t *f) {
+    return f->qn == 1 && qkey(f->queue[0]) == FK_DOWN && f->chain_until &&
+           s->clock < f->chain_until + f->down_grace && s->clock <= f->down_at + FIGHT_PREFIX_MS + f->down_grace;
+}
 
 // 连招里 ▼ 后面跟着前缀里的 ● / ▲(▼ 已经拿掉,这里拿掉跟着的那个键):
 //   ▼ ● → 大招(有气、这一套不是对着保护里的人打的、● 也不是对着保护按的);不能大招就只出拳;没气就是举盾、一拳。
@@ -233,7 +242,7 @@ static void chain_after_down(fight_sim_t *s, uint8_t who) {
     } else if (qkey(e) == FK_OK && f->gauge >= FIGHT_GAUGE_BAR) {
         start_super(s, who);
     } else if (qkey(e) == FK_UP && !f->special_cool) {
-        start_special(s, who, true);
+        start_special(s, who, true, s->f[!who].protect || (e & FIGHT_Q_NOSUPER));
     } else {
         apply_key(s, who, FK_DOWN);
         if (qkey(e) == FK_OK) apply_key(s, who, e);
@@ -253,7 +262,7 @@ static void drain_chain(fight_sim_t *s, uint8_t who) {
             chain_after_down(s, who);
             return;
         }
-        if (f->qn == 1 && s->clock - f->down_at <= FIGHT_PREFIX_MS) return;
+        if (down_waits(s, f)) return;
         apply_key(s, who, pop(f));
         drain_idle(s, who);
         return;
@@ -420,7 +429,10 @@ static void advance_state(fight_sim_t *s, uint8_t who) {
     default:
         break;
     }
-    if (f->protect && f->st == FS_IDLE && !f->eat_keys) f->protect = false;
+    if (f->protect && f->st == FS_IDLE && !f->eat_keys) {
+        f->protect = false;
+        f->protect_end = s->clock;
+    }
     if (f->chain_until && s->clock >= f->chain_until) {
         f->chain_open = false;
         if (s->clock >= f->chain_until + FIGHT_LATE_MAX) end_chain(f);
@@ -484,11 +496,14 @@ void fight_sim_key_at(fight_sim_t *s, uint8_t who, uint8_t key, uint16_t late_ms
         return;
     }
     uint8_t e = key;
+    const fight_fighter_t *o = &s->f[!who];
     if (key == FK_DOWN) {
         f->down_at = te;  // 每次 ▼ 都记(前缀),举不举盾另算
-    } else if (prefixed(f, key, te)) {
-        e |= FIGHT_Q_PREFIX;
-        if (key == FK_OK && s->f[!who].protect) e |= FIGHT_Q_NOSUPER;  // 对他按的 ● ▼ ● 只出拳
+        f->down_grace = late_ms ? FIGHT_LATE_MAX : 0;  // 晚到的:后面那个键可能比它还晚(排在它后面),最多晚这么多
+    } else {
+        if (prefixed(f, key, te)) e |= FIGHT_Q_PREFIX;
+        // 按的时候(本来的时刻)对方在保护里:对他按的 ● ▼ ● 只出拳,拿这个键起手的一套也不能有大招
+        if (o->protect || te < o->protect_end) e |= FIGHT_Q_NOSUPER;
     }
     f->down_last = key == FK_DOWN;
     if (f->st == FS_HITSTUN) return;  // 挨打僵着按的不算
@@ -519,7 +534,7 @@ void fight_sim_step(fight_sim_t *s) {
     if (check_ko(s)) return;
     for (uint8_t i = 0; i < 2; i++) advance_state(s, i);
     for (uint8_t i = 0; i < 2; i++) {
-        if (chain_ok(&s->f[i], s->clock)) drain_chain(s, i);
+        if (chain_ok(&s->f[i], s->clock) || down_waits(s, &s->f[i])) drain_chain(s, i);
         else drain_idle(s, i);
     }
     if (s->clock >= FIGHT_ROUND_MS && !s->freeze) time_up(s);

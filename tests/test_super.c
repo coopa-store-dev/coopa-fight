@@ -644,6 +644,80 @@ static void test_late_combo_pulls_back(void) {
     CHECK(S.f[0].hp == hp_max(0));
 }
 
+// 联机:晚到的 ▼(本来在窗口里按的)排着等后面同样晚到的 ●,按真时钟多等它晚到的那么久:还是大招
+static void test_late_down_waits(void) {
+    start(FC_GRANNY, FC_KID, 1000, 0);
+    key(0, FK_OK);                            // 200 打中,窗口到 800
+    run_to(700);
+    fight_sim_key_at(&S, 0, FK_DOWN, 400);    // 本来 300
+    CHECK(S.f[0].st == FS_IDLE && S.f[0].qn == 1);
+    run_to(1000);                             // 窗口、本来的 300 + 350 都过了,还在等
+    CHECK(S.f[0].st == FS_IDLE && S.f[0].qn == 1 && S.f[0].chain_until == 800);
+    fight_sim_key_at(&S, 0, FK_OK, 400);      // 本来 600
+    CHECK(ev_by(FE_SUPER, 0) == 1 && S.f[1].st == FS_SUPER_IN);
+    while (S.freeze) fight_sim_step(&S);
+    CHECK(S.f[1].hp == hp_max(1) - 40 - 330 && S.f[1].st == FS_DIZZY);
+
+    // 晚到的 ▼ 后面没有键:到了真时钟的期限(本来的 300 + 350 + FIGHT_LATE_MAX)就举盾
+    start(FC_GRANNY, FC_KID, 1000, 0);
+    key(0, FK_OK);
+    run_to(700);
+    fight_sim_key_at(&S, 0, FK_DOWN, 400);
+    run_to(1050);
+    CHECK(S.f[0].st == FS_IDLE && S.f[0].qn == 1);
+    run_to(1060);
+    CHECK(S.f[0].st == FS_GUARD && S.f[0].qn == 0 && ev(FE_SUPER) == 0);
+
+    // 只晚一点的 ▼ 也多等 FIGHT_LATE_MAX(排在它后面的键可能晚得多):▼ 本来 650、晚 50;● 本来 790、晚 310
+    start(FC_GRANNY, FC_KID, 1000, 0);
+    key(0, FK_OK);
+    run_to(700);
+    fight_sim_key_at(&S, 0, FK_DOWN, 50);
+    run_to(1100);
+    CHECK(S.f[0].st == FS_IDLE && S.f[0].qn == 1);
+    fight_sim_key_at(&S, 0, FK_OK, 310);
+    CHECK(ev_by(FE_SUPER, 0) == 1);
+
+    // 本地(不晚)的 ▼ 照旧:窗口一关就举盾
+    start(FC_GRANNY, FC_KID, 1000, 0);
+    key(0, FK_OK);
+    run_to(700);
+    key(0, FK_DOWN);
+    run_to(790);
+    CHECK(S.f[0].qn == 1);
+    run_to(800);
+    CHECK(S.f[0].st == FS_GUARD && S.f[0].qn == 0);
+}
+
+// 联机:起手本来是在对方保护里按的、晚到时保护已经没了:这一套照样不能有大招
+static void test_late_opener_protect(void) {
+    super_dizzy(2000);
+    uint32_t w = wake_natural();
+    int hp = S.f[1].hp;
+    run_to(w + 400);
+    CHECK(!S.f[1].protect && S.f[1].protect_end == w + 300);
+    fight_sim_key_at(&S, 0, FK_OK, 200);      // 本来 w + 200
+    run_to(w + 600);
+    CHECK(S.f[0].chain == 1 && S.f[1].st == FS_HITSTUN);
+    key(0, FK_DOWN);
+    run_to(w + 650);
+    key(0, FK_OK);
+    run_to(w + 3000);
+    CHECK(ev(FE_SUPER) == 1 && ev(FE_DIZZY) == 1 && S.f[1].hp == hp - 40 - 40);
+
+    // 对照:本来的时刻在保护消失以后(w + 310):正常起手,能出大招
+    super_dizzy(2000);
+    w = wake_natural();
+    run_to(w + 400);
+    fight_sim_key_at(&S, 0, FK_OK, 90);
+    run_to(w + 600);
+    CHECK(S.f[0].chain == 1);
+    key(0, FK_DOWN);
+    run_to(w + 650);
+    key(0, FK_OK);
+    CHECK(ev_by(FE_SUPER, 0) == 2);
+}
+
 int main(void) {
     test_jab_down_ok_super();
     test_super_needs_gauge();
@@ -668,6 +742,8 @@ int main(void) {
     test_stance_whiff();
     test_no_gauge_in_dizzy();
     test_late_combo_pulls_back();
+    test_late_down_waits();
+    test_late_opener_protect();
     printf("test_super: PASS\n");
     return 0;
 }
