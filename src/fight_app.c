@@ -73,6 +73,7 @@ static uint8_t s_count_shown;    // 倒数上次响到几
 static uint32_t s_flash[2], s_spark[2], s_shield[2];
 static uint16_t s_trail[2];      // 血条上刚掉的那段(千分比),慢慢往下收
 static bool s_cage[2];           // 被爸爸的大招打晕:关在铁笼里狂按
+static uint16_t s_dizzy_full[2]; // 这次晕一共多久(星星、进度条的分母);0 = 没晕
 static bool s_cut;
 static uint8_t s_cut_char, s_cut_side;
 static uint32_t s_cut_ms;
@@ -420,13 +421,23 @@ static void show_pick(void) {
 
 // ---- 对打页:从 G->sim(主动方是真的,被连方照快照填、自己的招先画)选动作图和特效 ----
 
-// 晕的星星:每狂按两下少一颗(至少留一颗)。被连方不知道对方按了几下,按还剩多久算。
+// 这次晕一共多久:主动方是规则里的 dur(大招晕 / 砸开防御晕不一样长);被连方的快照只有「过了多久 + 还剩多少」,
+// 狂按一下它就变短,所以记第一眼看到晕时的那个和
+static void track_dizzy(int side) {
+    const fight_fighter_t *f = &G->sim.f[sim_of(side)];
+    if (f->st != FS_DIZZY) s_dizzy_full[side] = 0;
+    else if (G->initiator) s_dizzy_full[side] = f->dur;
+    else if (!s_dizzy_full[side]) s_dizzy_full[side] = (uint16_t)(f->t + f->mash_left);
+    if (f->st == FS_DIZZY && !s_dizzy_full[side]) s_dizzy_full[side] = 1;
+}
+
+// 晕的星星:每狂按两下少一颗(至少留一颗)。被连方不知道对方按了几下,按还剩多少占这次晕的几成算。
 static uint8_t stars_of(int side, const fight_fighter_t *f) {
     if (f->st != FS_DIZZY) return 0;
     int n;
     if (G->initiator) n = STARS - fight_mash_taken(&G->sim, sim_of(side)) / 2;
     else if (side == 0) n = STARS - G->mash_n / 2;
-    else n = (f->mash_left * STARS + FIGHT_DIZZY_SUPER - 1) / FIGHT_DIZZY_SUPER;
+    else n = (f->mash_left * STARS + s_dizzy_full[side] - 1) / s_dizzy_full[side];
     return (uint8_t)(n < 1 ? 1 : n > STARS ? STARS : n);
 }
 
@@ -512,7 +523,10 @@ static void show_game(void) {
                 snprintf(v->sub, sizeof(v->sub), "%s", s_say);
                 v->sub_color = s_say_color;
             }
-            if (me->st == FS_DIZZY && me->dur) v->mash = (int16_t)(1000 - (uint32_t)me->mash_left * 1000 / me->dur);
+            if (me->st == FS_DIZZY && s_dizzy_full[0]) {
+                uint32_t left = me->mash_left < s_dizzy_full[0] ? me->mash_left : s_dizzy_full[0];
+                v->mash = (int16_t)(1000 - left * 1000 / s_dizzy_full[0]);
+            }
             keys_hint(v);
             break;
         }
@@ -600,6 +614,7 @@ static void fx_frame(uint32_t dt) {
     uint32_t *t[] = { &s_quiet, &s_over_ms, &s_pick_deaf, &s_fight_ms, &s_say_ms, &s_shake_ms,
                       &s_flash[0], &s_flash[1], &s_spark[0], &s_spark[1], &s_shield[0], &s_shield[1] };
     for (size_t i = 0; i < sizeof t / sizeof t[0]; i++) uk_countdown(t[i], dt);
+    for (int i = 0; i < 2; i++) track_dizzy(i);
     for (int i = 0; i < 2; i++) {  // 刚掉的血慢慢收(约 0.4 秒收 100‰);新回合满血
         const fight_fighter_t *f = &G->sim.f[sim_of(i)];
         int hp = (f->hp < 0 ? 0 : f->hp) * 1000 / fight_char(f->ch)->hp, step = (int)dt / 4 + 1;

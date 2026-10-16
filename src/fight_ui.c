@@ -11,12 +11,15 @@
 #include "fight_texts.h"
 #include "ui_kit.h"
 
-#define S 3            // 人物、特效放大 3 倍(16 → 48 像素)
+#define S 4            // 对打页的人物、特效放大 4 倍(16 → 64 像素)
 #define FIG 16
-#define ME_X 40        // 自己(左)放大后的左上角
+#define ME_X 24        // 自己(左)放大后的左上角
 #define PEER_X 152     // 对方(右)
 #define FIG_Y 146
-#define FLOOR_Y 194
+#define FLOOR_Y (FIG_Y + FIG * S)  // 脚踩在地上
+#define DIST (PEER_X - ME_X)       // 两个人中心隔多远
+#define REACH (FIG * S / 2)        // 弹珠、锅盖从身前(离自己中心这么远)飞出去
+#define FRONT (FIG * S / 2 - 4)    // 火花、盾画在身前多远
 #define BAR_Y 12       // 血条
 #define BAR_W 82
 #define BAR_H 14
@@ -26,11 +29,12 @@
 #define PIP_H 9
 #define STARS 5
 #define MASH_X 40      // 狂按进度条
-#define MASH_Y 232
+#define MASH_Y 224
 #define MASH_W 160
 #define RAYS 16
 #define CUT_FACE 10    // 特写大头像放大 10 倍
 #define TWIN 6         // 库巴的影分身
+#define TITLE_S 3      // 首页的两个人
 
 static const char *const NAMES[FC_COUNT] = { TX_KID, TX_DAD, TX_GRANNY, TX_GRANDPA };
 
@@ -73,14 +77,41 @@ static void set_img(lv_obj_t *o, const lv_image_dsc_t *d) {
 // 控件上的图的原尺寸(这里的图都是 lv_image_dsc_t;控件尺寸要等 LVGL 排版才更新,不能拿来算)
 static const lv_image_header_t *hdr(lv_obj_t *o) { return &((const lv_image_dsc_t *)lv_image_get_src(o))->header; }
 
+// 每帧改的属性:没变就不调 LVGL(set 一次就要重新排版、重画那一块,卡上每帧几十个控件吃不消;uk_show、uk_set_text 自己会比)
+static void pos(lv_obj_t *o, int x, int y) {
+    if (lv_obj_get_style_x(o, 0) != x || lv_obj_get_style_y(o, 0) != y) lv_obj_set_pos(o, x, y);
+}
+
+static void set_x(lv_obj_t *o, int x) {
+    if (lv_obj_get_style_x(o, 0) != x) lv_obj_set_x(o, x);
+}
+
+static void set_w(lv_obj_t *o, int w) {
+    if (lv_obj_get_style_width(o, 0) != w) lv_obj_set_width(o, w);
+}
+
+static void bg(lv_obj_t *o, uint32_t c) {
+    if (!lv_color_eq(lv_obj_get_style_bg_color(o, 0), lv_color_hex(c))) lv_obj_set_style_bg_color(o, lv_color_hex(c), 0);
+}
+
+static void ink(lv_obj_t *o, uint32_t c) {
+    if (!lv_color_eq(lv_obj_get_style_text_color(o, 0), lv_color_hex(c))) lv_obj_set_style_text_color(o, lv_color_hex(c), 0);
+}
+
+static void tint(lv_obj_t *o, uint32_t c, lv_opa_t opa) {
+    if (!lv_color_eq(lv_obj_get_style_image_recolor(o, 0), lv_color_hex(c)))
+        lv_obj_set_style_image_recolor(o, lv_color_hex(c), 0);
+    if (lv_obj_get_style_image_recolor_opa(o, 0) != opa) lv_obj_set_style_image_recolor_opa(o, opa, 0);
+}
+
 // (x, y) = 放大后的左上角
 static void place(lv_obj_t *o, int x, int y, int scale) {
     int w = hdr(o)->w, h = hdr(o)->h;
-    lv_obj_set_pos(o, x + (w * scale - w) / 2, y + (h * scale - h) / 2);
+    pos(o, x + (w * scale - w) / 2, y + (h * scale - h) / 2);
 }
 
 // 放大后的中心放在 (cx, cy)
-static void place_c(lv_obj_t *o, int cx, int cy) { lv_obj_set_pos(o, cx - hdr(o)->w / 2, cy - hdr(o)->h / 2); }
+static void place_c(lv_obj_t *o, int cx, int cy) { pos(o, cx - hdr(o)->w / 2, cy - hdr(o)->h / 2); }
 
 static void crown(lv_obj_t *scr, int x, int y) {  // 金色小皇冠:底座加三个尖
     uk_rect(scr, x, y + 6, 22, 7, UK_GOLD);
@@ -91,8 +122,8 @@ void fight_ui_title(uint8_t sel, unsigned wins) {
     lv_obj_t *scr = uk_screen_new(UK_WALL);
     centered(scr, UK_F36, UK_RED, TX_TITLE, 20);
     centered(scr, UK_F12, UK_INK, TX_SUB, 64);
-    place(image(scr, fight_art_pose(FC_KID, FA_JAB, false), S), 40, 82, S);
-    place(image(scr, fight_art_pose(FC_DAD, FA_GUARD, true), S), 152, 82, S);
+    place(image(scr, fight_art_pose(FC_KID, FA_JAB, false), TITLE_S), 40, 82, TITLE_S);
+    place(image(scr, fight_art_pose(FC_DAD, FA_GUARD, true), TITLE_S), 152, 82, TITLE_S);
     place(image(scr, fight_art_fx(FX_SPARK), 2), 108, 92, 2);
     char w[32];
     snprintf(w, sizeof(w), TX_WINS, wins);
@@ -150,16 +181,21 @@ void fight_ui_help(uint8_t ch) {
     if (ch >= FC_COUNT) ch = FC_KID;
     lv_obj_t *scr = uk_screen_new(UK_WALL);
     centered(scr, UK_F24, UK_RED, TX_HELP, 6);
-    help_row(scr, fight_art_pose(ch, FA_JAB, false), 38, TX_HELP_JAB, TX_HELP_JAB_WHAT, UK_FLOOR_D);
-    help_row(scr, fight_art_pose(ch, FA_HEAVY, false), 78, TX_HELP_HEAVY, TX_HELP_HEAVY_WHAT, UK_FLOOR_D);
-    help_row(scr, fight_art_pose(ch, FA_GUARD, false), 118, TX_HELP_GUARD, TX_HELP_GUARD_WHAT, UK_FLOOR_D);
-    help_row(scr, fight_art_pose(ch, FA_SPECIAL, false), 158, TX_HELP_SPECIAL, TX_HELP_SPECIAL_WHAT, UK_GREEN);
-    help_row(scr, fight_art_hot(ch), 198, TX_HELP_SUPER, TX_HELP_SUPER_WHAT, UK_RED);
-    centered(scr, UK_F12, UK_RED, TX_HELP_SUPER_HOW, 238);
-    centered(scr, UK_F12, UK_INK, TX_HELP_TAP, 254);
-    centered(scr, UK_F12, UK_INK, TX_HELP_MASH, 270);
+    help_row(scr, fight_art_pose(ch, FA_JAB, false), 36, TX_HELP_JAB, TX_HELP_JAB_WHAT, UK_FLOOR_D);
+    help_row(scr, fight_art_pose(ch, FA_HEAVY, false), 72, TX_HELP_HEAVY, TX_HELP_HEAVY_WHAT, UK_FLOOR_D);
+    help_row(scr, fight_art_pose(ch, FA_GUARD, false), 108, TX_HELP_GUARD, TX_HELP_GUARD_WHAT, UK_FLOOR_D);
+    help_row(scr, fight_art_pose(ch, FA_SPECIAL, false), 144, TX_HELP_SPECIAL, TX_HELP_SPECIAL_WHAT, UK_GREEN);
+    // 大招最要紧:两行大字
+    uk_rect(scr, 16, 182, UK_W - 32, 2, UK_LINE);
+    place(image(scr, fight_art_hot(ch), 3), 18, 194, 3);
+    lv_obj_t *t = uk_text(scr, UK_F24, UK_RED, TX_HELP_SUPER);
+    lv_obj_set_pos(t, 72, 190);
+    t = uk_text(scr, UK_F24, UK_RED, TX_HELP_SUPER2);
+    lv_obj_set_pos(t, 72, 218);
+    centered(scr, UK_F12, UK_INK, TX_HELP_TAP, 250);
+    centered(scr, UK_F12, UK_INK, TX_HELP_MASH, 266);
     lv_obj_t *ok = uk_pill(scr, UK_F12, UK_RED, UK_WHITE, TX_HELP_OK);
-    lv_obj_align(ok, LV_ALIGN_TOP_MID, 0, 290);
+    lv_obj_align(ok, LV_ALIGN_TOP_MID, 0, 288);
     uk_screen_swap(scr);
 }
 
@@ -202,8 +238,8 @@ void fight_ui_game(uint8_t me_char, uint8_t peer_char) {
     s_score = centered(s_scr, UK_F12, UK_INK, "", 34);
     make_side(0, me_char, false);
     make_side(1, peer_char, me_char == peer_char);
-    s_big = centered(s_scr, UK_F36, UK_INK, "", 64);
-    s_sub = centered(s_scr, UK_F24, UK_INK, "", 108);
+    s_big = centered(s_scr, UK_F36, UK_INK, "", 60);
+    s_sub = centered(s_scr, UK_F24, UK_INK, "", 100);  // 下面是晕的星星(FIG_Y 往上 20 像素以内)
     s_mash_bg = uk_rect(s_scr, MASH_X - 2, MASH_Y - 2, MASH_W + 4, 14, UK_INK);
     s_mash = uk_rect(s_scr, MASH_X, MASH_Y, 0, 10, UK_GOLD);
     s_hint = centered(s_scr, UK_F24, UK_INK, "", 250);
@@ -231,30 +267,28 @@ static void side_set(int i, const fight_side_view_t *v, int shake, uint32_t cloc
     // 血条:左边从左往右排、右边从右往左排,掉血从里侧(靠计时那头)往外缩
     int bx = i ? UK_W - BAR_L - BAR_W : BAR_L;
     int w = BAR_W * (v->hp > 1000 ? 1000 : v->hp) / 1000, tw = BAR_W * (v->trail > 1000 ? 1000 : v->trail) / 1000;
-    lv_obj_set_width(sd->hp, w);
-    lv_obj_set_x(sd->hp, i ? bx + BAR_W - w : bx);
-    lv_obj_set_style_bg_color(sd->hp, lv_color_hex(hp_color(v->hp)), 0);
-    lv_obj_set_width(sd->trail, tw);
-    lv_obj_set_x(sd->trail, i ? bx + BAR_W - tw : bx);
+    set_w(sd->hp, w);
+    set_x(sd->hp, i ? bx + BAR_W - w : bx);
+    bg(sd->hp, hp_color(v->hp));
+    set_w(sd->trail, tw);
+    set_x(sd->trail, i ? bx + BAR_W - tw : bx);
     for (int k = 0; k < 3; k++) {
         int part = (int)v->gauge - k * 1000;
         part = part < 0 ? 0 : part > 1000 ? 1000 : part;
-        lv_obj_set_width(sd->pip_fill[k], PIP_W * part / 1000);
+        set_w(sd->pip_fill[k], PIP_W * part / 1000);
         int px = i ? UK_W - BAR_L - PIP_W - k * (PIP_W + 4) : BAR_L + k * (PIP_W + 4);
-        if (i) lv_obj_set_x(sd->pip_fill[k], px + PIP_W - PIP_W * part / 1000);
-        uint32_t c = part == 1000 ? (v->gauge_blink ? UK_WHITE : UK_GOLD) : UK_ORANGE;
-        lv_obj_set_style_bg_color(sd->pip_fill[k], lv_color_hex(c), 0);
+        if (i) set_x(sd->pip_fill[k], px + PIP_W - PIP_W * part / 1000);
+        bg(sd->pip_fill[k], part == 1000 ? (v->gauge_blink ? UK_WHITE : UK_GOLD) : UK_ORANGE);
     }
     // 人
     int dir = i ? -1 : 1, x = (i ? PEER_X : ME_X) + dir * v->dx + shake;
     set_img(sd->fig, fight_art_pose(sd->ch, v->pose, i == 1));
     place(sd->fig, x, FIG_Y, S);
-    lv_obj_set_style_image_recolor(sd->fig, lv_color_hex(v->flash ? UK_WHITE : UK_BLUE), 0);
-    if (v->flash) lv_obj_set_style_image_recolor_opa(sd->fig, LV_OPA_70, 0);
-    else lv_obj_set_style_image_recolor_opa(sd->fig, i && s_side[0].ch == s_side[1].ch ? LV_OPA_30 : LV_OPA_TRANSP, 0);
-    int cx = x + FIG * S / 2, cy = FIG_Y + FIG * S / 2, front = cx + dir * 22;
+    if (v->flash) tint(sd->fig, UK_WHITE, LV_OPA_70);
+    else tint(sd->fig, UK_BLUE, i && s_side[0].ch == s_side[1].ch ? LV_OPA_30 : LV_OPA_TRANSP);
+    int cx = x + FIG * S / 2, cy = FIG_Y + FIG * S / 2, front = cx + dir * FRONT;
     uk_show(sd->spark, v->spark);
-    if (v->spark) place_c(sd->spark, front - dir * 6, cy - 8);  // 火花画在挨打的人身前,放大后的中心
+    if (v->spark) place_c(sd->spark, front - dir * 8, cy - 10);  // 火花画在挨打的人身前,放大后的中心
     uk_show(sd->shield, v->shield);
     if (v->shield) place_c(sd->shield, front + dir * 4, cy);
     uk_show(sd->prop, v->prop != 0);
@@ -267,7 +301,7 @@ static void side_set(int i, const fight_side_view_t *v, int shake, uint32_t cloc
         uk_show(sd->star[k], on);
         if (!on) continue;
         int n = v->stars, sx = cx - (n - 1) * 8 + k * 16;
-        int sy = FIG_Y - 12 + uk_tri(clock + (uint32_t)k * 120, 600, 6) - 3;
+        int sy = FIG_Y - 8 + uk_tri(clock + (uint32_t)k * 120, 600, 6) - 3;
         place_c(sd->star[k], sx, sy);
     }
 }
@@ -300,14 +334,14 @@ void fight_ui_pose(const fight_fighter_t *f, fight_side_view_t *v) {
                 case FM_SPECIAL:
                     v->pose = f->t < out ? FA_SPECIAL : FA_IDLE;
                     if (f->ch == FC_DAD && f->t < out) v->dx = (int8_t)(f->t < hit_at ? 16 * f->t / hit_at : 16);  // 肩撞冲过去
-                    // 弹珠飞过去;锅盖飞过去再飞回来(两个人中心隔 112 像素)
+                    // 弹珠飞到对方身上;锅盖飞过去再飞回来
                     if (f->ch == FC_KID && f->t < hit_at) {
                         v->prop = FX_PELLET + 1;
-                        v->prop_x = (int16_t)(24 + 88 * f->t / (hit_at ? hit_at : 1));
+                        v->prop_x = (int16_t)(REACH + (DIST - REACH) * f->t / (hit_at ? hit_at : 1));
                     } else if (f->ch == FC_GRANNY && f->t < end) {
                         v->prop = FX_LID + 1;
-                        v->prop_x = (int16_t)(f->t < hit_at ? 24 + 88 * f->t / (hit_at ? hit_at : 1)
-                                                            : 112 - 88 * (f->t - hit_at) / (end - hit_at));
+                        v->prop_x = (int16_t)(f->t < hit_at ? REACH + (DIST - REACH) * f->t / (hit_at ? hit_at : 1)
+                                                            : DIST - (DIST - REACH) * (f->t - hit_at) / (end - hit_at));
                     }
                     break;
                 default:  // 轻拳
@@ -340,7 +374,7 @@ void fight_ui_pose(const fight_fighter_t *f, fight_side_view_t *v) {
         case FS_STANCE:  // 爷爷的太极架势
             v->pose = FA_SPECIAL;
             v->prop = FX_TAIJI + 1;
-            v->prop_x = 30;
+            v->prop_x = FRONT + 8;
             break;
         case FS_KO:
             v->dx = -10;
@@ -381,7 +415,7 @@ static void cut_set(const fight_view_t *v) {
     if (!on) return;
     int shake = t >= 400 && t < 1400 ? ((t / 40) & 1 ? 5 : -5) : 0;
     bool hit = t >= 700 && (t - 700) % 200 < 60 && t < 1300;  // 连着三下打击:白闪
-    lv_obj_set_style_bg_color(s_cut_bg, lv_color_hex(hit ? UK_WHITE : UK_INK), 0);
+    bg(s_cut_bg, hit ? UK_WHITE : UK_INK);
     set_img(s_cut_face, fight_art_hot(v->cut_char));
     int x = t < 250 ? -160 + (int)(200 * t / 250) : 40;
     place(s_cut_face, x + shake, 24, CUT_FACE);
@@ -400,22 +434,23 @@ static void cut_set(const fight_view_t *v) {
     }
     uk_set_text(s_cut_name, v->cut_name ? v->cut_name : "");
     int y = t < 200 ? -90 : t < 400 ? -90 + (int)(290 * (t - 200) / 200) : 200;
-    lv_obj_align(s_cut_name, LV_ALIGN_TOP_MID, shake, y);
-    lv_obj_set_style_text_color(s_cut_name, lv_color_hex((t / 100) & 1 ? UK_GOLD : UK_WHITE), 0);
+    if (lv_obj_get_style_x(s_cut_name, 0) != shake || lv_obj_get_style_y(s_cut_name, 0) != y)
+        lv_obj_align(s_cut_name, LV_ALIGN_TOP_MID, shake, y);
+    ink(s_cut_name, (t / 100) & 1 ? UK_GOLD : UK_WHITE);
 }
 
 void fight_ui_game_set(const fight_view_t *v) {
     uk_set_text(s_timer, v->timer);
     uk_set_text(s_score, v->score);
     uk_set_text(s_big, v->big);
-    lv_obj_set_style_text_color(s_big, lv_color_hex(v->big_color), 0);
+    ink(s_big, v->big_color);
     uk_set_text(s_sub, v->sub);
-    lv_obj_set_style_text_color(s_sub, lv_color_hex(v->sub_color), 0);
+    ink(s_sub, v->sub_color);
     uk_set_text(s_hint, v->hint);
-    lv_obj_set_style_text_color(s_hint, lv_color_hex(v->hint_color), 0);
+    ink(s_hint, v->hint_color);
     for (int i = 0; i < 2; i++) side_set(i, &v->s[i], v->shake, v->clock);
     uk_show(s_mash_bg, v->mash >= 0);
     uk_show(s_mash, v->mash >= 0);
-    if (v->mash >= 0) lv_obj_set_width(s_mash, MASH_W * (v->mash > 1000 ? 1000 : v->mash) / 1000);
+    if (v->mash >= 0) set_w(s_mash, MASH_W * (v->mash > 1000 ? 1000 : v->mash) / 1000);
     cut_set(v);
 }

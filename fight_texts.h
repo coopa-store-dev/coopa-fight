@@ -52,10 +52,9 @@
 #define TX_HELP_GUARD_WHAT "挡住拳"
 #define TX_HELP_SPECIAL "▼ ▲"
 #define TX_HELP_SPECIAL_WHAT "小招，不花气"
-#define TX_HELP_SUPER "● ▼ ●"
-#define TX_HELP_SUPER_WHAT "大招！"
-#define TX_HELP_SUPER_HOW "● 打中后马上按 ▼ ●，花一格气"
-#define TX_HELP_TAP "嗒嗒嗒，快快点三下"
+#define TX_HELP_SUPER "● 打中后马上"
+#define TX_HELP_SUPER2 "▼ ● 大招！"
+#define TX_HELP_TAP "花一格气。嗒嗒嗒，快快点三下"
 #define TX_HELP_MASH "晕了就狂按挣脱"
 #define TX_HELP_OK "● 知道了"
 

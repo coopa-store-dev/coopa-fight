@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """一个桌面模拟器(外壳的 tools/sim,step 时钟)装上库巴格斗,和电脑闯关。按键全用 press / down / up(真的按键组件)。
 第一次进游戏先看出招表 → 首页「和电脑打」→ 选库巴 → 开打:
-  1. 先测按键(Review Focus 1、Task 2 留下的):按着 ▼ 过 0.5 秒长按,盾撑过 600 ms(状态行里看);
-     按着 ▼ 按 ●(● 没反应)、按着 ● 按 ▼ 再松开 ▼(冒出一个新的 ●):不崩,最多多一拳,不出大招;
+  1. 按着 ▼ 过 0.5 秒长按,盾撑过不长按的时间(状态行里看;Task 2 留下的);
   2. 攒气:站着挨打(挨打涨气最多),攒满一格;
-  3. 打:对方 idle / 在出招就 ●,在防就 ▲;● 打中(连招窗口开着)有气就 ▼ ●(大招),没气就再 ●;晕了狂按。
+  3. 两个键叠着按(Review Focus 1),在自己有气、对方站着不在保护里时测(做错了大招会冒出来),被打断就等下一次:
+     按着 ▼ 点 ●:没反应;按着 ▼ 按 ●、先松开 ▼:幻影 ● 只出一拳、没大招;
+     按着 ● 按 ▼ 再松开 ▼、再点 ●:● 打中了最多一次大招(这就是 ● ▼ ●),没打中最多多一拳;
+  4. 打:对方 idle / 在出招就 ●,在防就 ▲;● 打中(连招窗口开着)有气就 ▼ ●(大招),没气就再 ●;晕了狂按。
 直到第 1 关赢过、大招放过(大招特写、对方晕都截图)。中途不开蓝牙(状态行的模式 = 1)。
   tests/sim_cpu.py --shell 外壳仓库目录(或环境变量 COOPA_SHELL) [--font-dir DIR] [--keep] [--shots DIR]
 --font-dir:按本游戏文案生成的字库(没给就用外壳提交的字库,游戏里的生字截图上是空白,不影响判定)。"""
@@ -59,13 +61,22 @@ def main():
 
     def stat():
         f = c.cmd("stat").split()
-        return dict(zip(KEYS, map(int, f[2:]))) if len(f) == len(KEYS) + 2 and f[:2] == ["ok", "FT"] else None
+        if len(f) != len(KEYS) + 2 or f[:2] != ["ok", "FT"]:
+            return None
+        s = dict(zip(KEYS, map(int, f[2:])))
+        if s["peer_st"] == FS_DIZZY:
+            clock["peer_dizzy"] = clock["now"]
+        return s
+
+    clock = {"now": 0, "peer_dizzy": -10 ** 9}  # 模拟时间(脚本自己数);对方最近一次晕着是什么时候
 
     def wait(ms):
         c.ok(f"wait {ms}")
+        clock["now"] += ms
 
     def press(k, ms=50):  # 按下 ms 再松开(模拟时间跟着走)
         c.ok(f"press {k} {ms}")
+        clock["now"] += ms
 
     def shot(name):
         if a.shots and name not in shots:
@@ -101,61 +112,94 @@ def main():
         return False
 
     def run_states(ms):
-        """往前走 ms,记下每 10 ms 自己的状态;挨打、晕了(对方打过来)返回 None。"""
+        """往前走 ms,每 10 ms 记一次(自己的状态, t, 连招窗口, 对方的状态);自己挨打、晕了(对方打过来)返回 None。"""
         out = []
         for _ in range(ms // 10):
             x = stat()
-            assert x["page"] == PG_GAME and x["st"] != FS_SUPER_OUT, x  # 不崩、不冒出大招
+            assert x["page"] == PG_GAME, x  # 不崩
             if x["st"] in (FS_HITSTUN, FS_DIZZY, FS_SUPER_IN):
                 return None
-            out.append((x["st"], x["t"]))
+            out.append((x["st"], x["t"], x["chain"], x["peer_st"]))
             wait(10)
+        return out
+
+    def seq(steps):
+        """按一串:(控制口命令, 之后走多少毫秒);中途被对方打断返回 None。"""
+        out = []
+        for cmd, ms in steps:
+            c.ok(cmd)
+            st = run_states(ms)
+            if st is None:
+                for k in ("down", "ok"):  # 别把键按着不放
+                    c.ok(f"up {k}")
+                return None
+            out += st
         return out
 
     def moves_in(states):
         """出了几下招(进 FS_MOVE、或者 FS_MOVE 的 t 重新从小数起)。"""
         n, last = 0, None
-        for st, t in states:
+        for st, t, _, _ in states:
             if st == FS_MOVE and (last is None or t < last):
                 n += 1
             last = t if st == FS_MOVE else None
         return n
 
-    def overlap_down_ok():
-        """按着 ▼ 按 ●:● 没反应(▼ 压过 ●)。返回 True = 测完;None = 被对方打断了。"""
-        c.ok("down down")
-        wait(80)
-        c.ok("down ok")
-        st = run_states(80)
-        c.ok("up ok")
-        st = st and st + (run_states(80) or [])
-        c.ok("up down")
-        st = st and st + (run_states(300) or [])
-        if not st:
+    def supers_in(states):
+        """放出了几次大招;每次是不是从打中的那一拳接出来的:前一刻在出拳(打中的那一步 ▼ ● 就接成大招,
+        状态行看不到中间的连招窗口)、或者看到过连招窗口 / 对方挨打僵着。● 没打中时 ▼ ● 只是举盾加一拳(前一刻是盾)。"""
+        n, hit, ok = 0, False, True
+        for i, (st, _, chain, peer_st) in enumerate(states):
+            hit |= chain == 1 or peer_st == FS_HITSTUN
+            prev = states[i - 1][0] if i else None
+            if st == FS_SUPER_OUT and prev != FS_SUPER_OUT:
+                n += 1
+                ok &= hit or prev == FS_MOVE
+        return n, ok
+
+    def free_peer(s, guard_ok):
+        """能测两个键叠着按:自己站着、有一格气(做错了会冒出大招),对方站着不在保护里 —— 3 秒内没晕过、
+        或者站了 0.4 秒以上(醒后不挨打 0.3 秒就没了保护);guard_ok:对方在防也行(举盾说明他已经能动,保护没了)。"""
+        unprotected = clock["now"] - clock["peer_dizzy"] > 3000 or s["peer_t"] >= 400
+        return (s["phase"] == GP_PLAY and s["st"] == FS_IDLE and s["g"] >= 1000 and
+                ((s["peer_st"] == FS_IDLE and unprotected) or (guard_ok and s["peer_st"] == FS_GUARD)))
+
+    def overlap_down_tap():
+        """按着 ▼ 点一下 ●(先松开 ●):● 没反应(▼ 压过 ●),不出招、不出大招。"""
+        st = seq([("down down", 80), ("down ok", 80), ("up ok", 80), ("up down", 400)])
+        if st is None:
             return None
-        assert moves_in(st) == 0, st
-        print("  按着 ▼ 按 ●:● 没反应", flush=True)
+        assert moves_in(st) == 0 and supers_in(st)[0] == 0, st
+        print("  有气,按着 ▼ 点 ●:● 没反应", flush=True)
         return True
 
-    def overlap_ok_down():
-        """按着 ● 按 ▼ 再松开 ▼:冒出一个新的 ●(幻影)。不崩、最多多一拳、不出大招。返回 True / None(被打断)。"""
-        c.ok("down ok")  # 按着 ●(出一拳)
-        st = run_states(80)
-        c.ok("down down")  # 再按 ▼:● 算松开
-        st = st and st + (run_states(80) or [])
-        c.ok("up down")  # 松开 ▼:还按着的 ● 又算一次按下
-        st = st and st + (run_states(60) or [])
-        c.ok("up ok")
-        st = st and st + (run_states(800) or [])
-        if not st:
+    def overlap_down_phantom():
+        """按着 ▼ 再按着 ●,先松开 ▼:还按着的 ● 冒出来(幻影)。前面没有打中的 ●,▼ ● 不是大招:只多一拳。"""
+        st = seq([("down down", 80), ("down ok", 80), ("up down", 80), ("up ok", 900)])
+        if st is None:
             return None
-        n = moves_in(st)
-        assert 1 <= n <= 2, f"出了 {n} 下:{st}"
-        print(f"  按着 ● 按 ▼ 再松开 ▼:出了 {n} 下(第二下是幻影 ●),没崩、没大招", flush=True)
+        n, (sup, _) = moves_in(st), supers_in(st)
+        assert sup == 0, f"冒出了大招:{st}"
+        assert n == 1, f"出了 {n} 下:{st}"
+        print("  有气,按着 ▼ 按 ● 再先松开 ▼:幻影 ● 只出一拳,没大招", flush=True)
         return True
 
-    def attack(s):
-        """一下:对方在防就 ▲,不然 ●;● 打中了接 ▼ ●(有气)或 ●。返回放没放出大招。"""
+    def overlap_ok_phantom():
+        """按着 ● 按 ▼ 再松开 ▼(冒出幻影 ●),再照常点一下 ●:人想按的是 ● ▼ ●。● 打中了出一次大招是对的(设计 §12),
+        不能出两次、● 没打中不能出;没出大招时最多比 ● ▼ ● 多一拳。返回 None = 被打断,不然 = 出没出大招。"""
+        st = seq([("down ok", 80), ("down down", 80), ("up down", 60), ("up ok", 60), ("down ok", 50),
+                  ("up ok", 1200)])
+        if st is None:
+            return None
+        n, (sup, after_hit) = moves_in(st), supers_in(st)
+        assert sup <= 1 and after_hit, f"大招 {sup} 次、打中以后才出 {after_hit}:{st}"
+        assert n <= 3, f"出了 {n} 下:{st}"  # ● 没打中:拳、盾、拳;多出来的最多一拳
+        what = "● 打中,只出了一次大招(多的 ● 没再出)" if sup else f"● 没打中,出了 {n} 下拳"
+        print(f"  有气,按着 ● 按 ▼ 再松开 ▼、再点 ●:{what}", flush=True)
+        return sup
+
+    def attack(s, allow_super):
+        """一下:对方在防就 ▲,不然 ●;● 打中了接 ▼ ●(有气、allow_super)或 ●。返回放没放出大招。"""
         if s["peer_st"] == FS_GUARD:
             press("up")
             return False
@@ -163,7 +207,7 @@ def main():
         hit = watch(500, lambda x: x["chain"] == 1)
         if not hit:
             return False
-        if hit["g"] >= 1000:
+        if hit["g"] >= 1000 and allow_super:
             press("down", 40)
             wait(30)
             press("ok", 40)
@@ -203,9 +247,11 @@ def main():
         shot("4-count")
         assert watch(5000, lambda x: x["phase"] == GP_PLAY), "没开打"
         assert test_long_guard(), "按着 ▼ 盾没撑住"
-        pending = [overlap_down_ok, overlap_ok_down]  # 两个键叠着按:在对方被大招打晕的时候测(他打不过来)
+        # 两个键叠着按:自己有一格气、对方站着(不在保护里),做错了大招会冒出来;被对方打断就等下一次
+        # 第三个要对方站着不防(● 多半打得中),才测得到「打中了只出一次大招」
+        pending = [(overlap_down_tap, True), (overlap_down_phantom, True), (overlap_ok_phantom, False)]
         beat1, supers, dizzy_seen, matches = False, 0, False, 0
-        budget = 3000  # 模拟时间上限:约 3000 次 × 平均几十 ms
+        budget = 6000  # 模拟时间上限:约 3000 次 × 平均几十 ms
         while budget > 0:
             budget -= 1
             s = stat()
@@ -235,16 +281,19 @@ def main():
                 shot("7-dizzy")
                 continue
             if s["st"] == FS_DIZZY:  # 晕了:狂按
-                shot("8-me-dizzy")
+                if s["t"] >= 200:  # 刚晕那一下还在闪白
+                    shot("8-me-dizzy")
                 press("ok", 40)
                 wait(100)
                 continue
             if s["st"] not in (FS_IDLE, FS_GUARD):
                 wait(20)
                 continue
-            if pending and s["peer_st"] == FS_DIZZY and s["st"] == FS_IDLE:
-                if pending[0]():
+            if pending and free_peer(s, pending[0][1]):
+                r = pending[0][0]()
+                if r is not None:
                     pending.pop(0)
+                    supers += bool(r)
                 continue
             if (not supers or pending) and s["g"] < 1000:  # 攒气:站着挨打
                 shot("5-fight")
@@ -252,7 +301,7 @@ def main():
                 continue
             if s["g"] >= 1000:
                 shot("5-super-hint")
-            if attack(s):
+            if attack(s, allow_super=not pending):
                 supers += 1
                 wait(800)  # 道具砸下来、分身出来以后
                 shot("6-super")
