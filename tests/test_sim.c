@@ -77,7 +77,7 @@ static void test_heavy_breaks_guard(void) {
     run_to(600);
     CHECK(ev_by(FE_GUARD_BREAK, 0) == 1 && ev(FE_BLOCK) == 0);
     CHECK(S.f[1].hp == hp_max(1) - 120);
-    CHECK(S.f[1].st == FS_HITSTUN);
+    CHECK(S.f[1].st == FS_DIZZY && S.f[1].mash_left == FIGHT_DIZZY_BREAK && S.f[1].protect);   // 砸开防御:晕
     CHECK(S.f[1].guard_cool == FIGHT_GUARD_COOL);
     CHECK(S.f[0].chain == 0);   // 重击不开连招
 }
@@ -110,6 +110,30 @@ static void test_heavy_armor_late(void) {
     CHECK(ev_by(FE_HIT, 0) == 1 && ev_by(FE_HIT, 1) == 1);
     CHECK(S.f[0].gauge == FIGHT_GAUGE_HIT + FIGHT_GAUGE_HURT);
     CHECK(S.f[1].gauge == FIGHT_GAUGE_HIT + FIGHT_GAUGE_HURT);
+}
+
+// 重击后半段只扛得住轻拳:重击、小招打到照样打断
+static void test_heavy_armor_jabs_only(void) {
+    // 爸爸重击 500 打到,库巴的重击抡到 500(过了 armor_from 300)也被打断
+    start(FC_KID, FC_DAD, 0, 0);
+    key(0, FK_UP);
+    key(1, FK_UP);
+    run_to(500);
+    CHECK(S.f[0].st == FS_HITSTUN && S.f[0].hp == hp_max(0) - 150);
+    run_to(2000);
+    CHECK(S.f[1].hp == hp_max(1) && ev_by(FE_HIT, 0) == 0);
+
+    // 爸爸肩撞(▼ ▲)360 打到,库巴的重击抡到 360 也被打断
+    start(FC_KID, FC_DAD, 0, 0);
+    key(0, FK_UP);
+    key(1, FK_DOWN);
+    run_to(10);
+    key(1, FK_UP);
+    CHECK(S.f[1].move == FM_SPECIAL);
+    run_to(360);
+    CHECK(S.f[0].st == FS_HITSTUN && S.f[0].hp == hp_max(0) - 80);
+    run_to(2000);
+    CHECK(S.f[1].hp == hp_max(1));
 }
 
 // 提前按 ● ▲:轻拳打中后都连上,对方一直僵着,伤害 40 + 40 + 100
@@ -195,7 +219,7 @@ static void test_guard_then_jab(void) {
     CHECK(S.f[1].hp == hp_max(1) - 40);
 }
 
-// 冷却里按 ▼ 不举盾,但时刻照记(0.35 秒内的 ▲ 仍是小招入口;小招以后做,现在出重击)
+// 冷却里按 ▼ 不举盾,但时刻照记(0.35 秒内的 ▲ 仍是小招)
 static void test_down_in_cool_prefix_kept(void) {
     start(FC_KID, FC_DAD, 0, 0);
     CHECK(S.f[0].down_at == UINT32_MAX);
@@ -208,7 +232,7 @@ static void test_down_in_cool_prefix_kept(void) {
     CHECK(S.f[0].st == FS_IDLE && S.f[0].down_at == 700);
     run_to(800);
     key(0, FK_UP);
-    CHECK(S.f[0].st == FS_MOVE && S.f[0].move == FM_HEAVY);
+    CHECK(S.f[0].st == FS_MOVE && S.f[0].move == FM_SPECIAL);
 }
 
 // 晚到的键按本来按下的时刻判连招窗口
@@ -316,7 +340,7 @@ static void test_trade(void) {
 
 // 叠着按冒出的「幻影」●:连按 ● ▼ ● 再多一个 ●,不崩,最多多一拳
 static void test_overlap_extra_jab(void) {
-    // 打中:▼ 只是前缀,后面两下 ● 接成三连
+    // 打中、没气:▼ ● 是举盾 + 一拳(新的一拳,对方还僵着,打中),多的 ● 接在它后面
     start(FC_GRANNY, FC_KID, 0, 0);
     key(0, FK_OK);
     run_to(60);
@@ -327,7 +351,7 @@ static void test_overlap_extra_jab(void) {
     key(0, FK_OK);
     run_to(3000);
     CHECK(ev_by(FE_START, 0) == 3 && ev_by(FE_HIT, 0) == 3);
-    CHECK(S.f[1].hp == hp_max(1) - (40 + 40 + 70));
+    CHECK(S.f[1].hp == hp_max(1) - (40 + 40 + 40));
     CHECK(S.f[0].st == FS_IDLE && S.f[0].qn == 0 && S.f[1].st == FS_IDLE);
 
     // 被挡:收招完举盾、出拳,多的那个 ● 再一拳(这一拳打中,接成连招)
@@ -344,6 +368,49 @@ static void test_overlap_extra_jab(void) {
     CHECK(ev_by(FE_START, 0) == 3 && ev_by(FE_BLOCK, 0) == 1);
     CHECK(S.f[1].hp >= hp_max(1) - 80);
     CHECK(S.f[0].st == FS_IDLE && S.f[0].qn == 0);
+
+    // 打中、有两格气:● ▼ ● 出一次大招;多的 ● 前面不是 ▼,不会再试一次大招(特写前排着的键作废)
+    start(FC_GRANNY, FC_KID, 2000, 0);
+    key(0, FK_OK);
+    run_to(60);
+    key(0, FK_DOWN);
+    run_to(120);
+    key(0, FK_OK);
+    run_to(180);
+    key(0, FK_OK);
+    run_to(200);
+    CHECK(ev_by(FE_SUPER, 0) == 1 && S.f[0].qn == 0);
+    run_to(1500);
+    CHECK(ev_by(FE_SUPER, 0) == 1 && ev_by(FE_START, 0) == 1);
+    CHECK(S.f[0].gauge == 2000 + FIGHT_GAUGE_HIT - FIGHT_GAUGE_BAR);
+    CHECK(S.f[1].st == FS_DIZZY && S.f[1].hp == hp_max(1) - 40 - 330);
+}
+
+// ▼ 只管紧跟在它后面的那个键:▼ ● ● 连按,第二个 ● 离 ▼ 不到 0.35 秒也只是连招第二拳
+static void test_prefix_binds_next_key(void) {
+    start(FC_GRANNY, FC_KID, 1000, 0);
+    key(0, FK_DOWN);
+    run_to(100);
+    key(0, FK_OK);   // 放下盾出拳,300 打到
+    run_to(200);
+    key(0, FK_OK);
+    run_to(300);
+    CHECK(S.f[0].move == FM_JAB2 && ev(FE_SUPER) == 0);
+    run_to(3000);
+    CHECK(ev(FE_SUPER) == 0 && S.f[1].hp == hp_max(1) - 80 && S.f[0].gauge >= FIGHT_GAUGE_BAR);
+
+    // ▼ ● ▲:▲ 前面是 ●,不是小招(● 被挡,收招完 ▲ 是重击)
+    start(FC_KID, FC_DAD, 0, 0);
+    key(1, FK_DOWN);
+    key(0, FK_DOWN);
+    run_to(100);
+    key(0, FK_OK);
+    run_to(200);
+    key(0, FK_UP);
+    run_to(250);
+    CHECK(S.f[0].st == FS_BLOCKSTUN && S.f[0].qn == 1);
+    while (S.f[0].st == FS_BLOCKSTUN) fight_sim_step(&S);
+    CHECK(S.f[0].st == FS_MOVE && S.f[0].move == FM_HEAVY);
 }
 
 static void test_ko(void) {
@@ -441,6 +508,7 @@ int main(void) {
     test_heavy_breaks_guard();
     test_jab_interrupts_heavy_early();
     test_heavy_armor_late();
+    test_heavy_armor_jabs_only();
     test_chain_jab_jab_heavy();
     test_buffered_on_block();
     test_guard_then_jab();
@@ -451,6 +519,7 @@ int main(void) {
     test_guard_cool();
     test_trade();
     test_overlap_extra_jab();
+    test_prefix_binds_next_key();
     test_ko();
     test_timeup();
     test_gauge_caps();
