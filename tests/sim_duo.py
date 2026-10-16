@@ -35,7 +35,7 @@ class Card:
         sock = os.path.join(d, "ctl.sock")
         self.proc = subprocess.Popen(
             [os.path.join(shell, "tools/sim/run.sh"), "--headless", "--wipe", "--seed", str(seed), "--catalog", catalog,
-             "--games", "12", *(["--font-dir", fonts] if fonts else []), "--ctl", sock,
+             "--games", "13", *(["--font-dir", fonts] if fonts else []), "--ctl", sock,
              "--state", os.path.join(d, "state"), "--out", os.path.join(d, "out")],
             stdout=open(os.path.join(d, "stdout.log"), "w"), stderr=subprocess.STDOUT)
         end = time.time() + 600

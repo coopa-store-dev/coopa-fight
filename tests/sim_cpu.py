@@ -48,7 +48,7 @@ def main():
     sock = os.path.join(root, "ctl.sock")
     proc = subprocess.Popen(
         [os.path.join(shell, "tools/sim/run.sh"), "--headless", "--wipe", "--clock", "step", "--seed", "5",
-         "--catalog", catalog, "--games", "12", *(["--font-dir", a.font_dir] if a.font_dir else []), "--ctl", sock,
+         "--catalog", catalog, "--games", "13", *(["--font-dir", a.font_dir] if a.font_dir else []), "--ctl", sock,
          "--state", os.path.join(root, "state"), "--out", os.path.join(root, "out"), *a.sim_args.split()],
         stdout=open(os.path.join(root, "stdout.log"), "w"), stderr=subprocess.STDOUT)
     end = time.time() + 600

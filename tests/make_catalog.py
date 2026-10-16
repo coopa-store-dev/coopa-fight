@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""生成一份带库巴格斗(12 号,local:本仓库)的商店目录,给外壳的模拟器 / 卡上构建用(照 coopa-bomb)。
+"""生成一份带库巴格斗(13 号,local:本仓库;测试卡上 12 号已经有别的游戏)的商店目录,给外壳的模拟器 / 卡上构建用(照 coopa-bomb)。
   tests/make_catalog.py SHELL OUT.toml
 SHELL = 外壳仓库目录;目录里原有的游戏照抄。"""
 import sys
@@ -12,7 +12,7 @@ src = src.replace('icons = ["icons/', f'icons = ["{shell}/store/icons/').replace
 src = src.replace('repo = "local:', f'repo = "local:{shell}/')
 out.write_text(src + f'''
 [[game]]
-no = 12
+no = 13
 id = "fight"
 author = "库巴老爸"
 blurb = "三个键的格斗:轻拳打中马上接大招"

@@ -74,4 +74,4 @@ Needs shell API 2 (`kit_api = 2`, `kit_link.h`) and SDK 4.
 - `coopa check`: the same checks the store runs.
 - All the numbers live in the move table in `src/fight_moves.c` and the macros in `src/fight_sim.h`.
 
-MIT License (see `LICENSE`).
+All rights reserved.

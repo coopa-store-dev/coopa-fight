@@ -58,4 +58,4 @@
 - `coopa check`:和商店一样的检查。
 - 数值都在 `src/fight_moves.c` 的出招表和 `src/fight_sim.h` 的宏里。
 
-MIT 许可证(见 `LICENSE`)。
+版权所有,保留一切权利。
