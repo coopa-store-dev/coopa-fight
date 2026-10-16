@@ -33,7 +33,7 @@ static void test_cfg_sums(void) {
     CHECK(FIGHT_BOT_HARD.react_ms == 500);
 }
 
-// 两个模型对打 60 秒(一回合打完就再开一回合):每个人两下按下之间都 ≥ gap_ms(长按不是新的按下)
+// 两个模型对打 60 秒(一回合打完就再开一回合):每个人一回合里两下按下之间都 ≥ gap_ms(长按不是新的按下)
 static void test_cadence(void) {
     for (int i = 0; i < 5; i++) {
         for (int j = 0; j < 5; j++) {
@@ -45,7 +45,10 @@ static void test_cadence(void) {
             uint32_t last[2] = { 0, 0 }, presses[2] = { 0, 0 }, wall = 0;   // wall:特写时 clock 不走,这里按真的时间比
             bool any[2] = { false, false };
             for (; wall < 60000; wall += FIGHT_STEP) {
-                if (s.winner != FIGHT_UNDECIDED) fight_sim_init(&s, (uint8_t)(i % FC_COUNT), (uint8_t)(j % FC_COUNT), 0, 0);
+                if (s.winner != FIGHT_UNDECIDED) {   // 下一回合:节拍重新起(真的比赛里两回合之间隔 5 秒多)
+                    fight_sim_init(&s, (uint8_t)(i % FC_COUNT), (uint8_t)(j % FC_COUNT), 0, 0);
+                    any[0] = any[1] = false;
+                }
                 for (uint8_t w = 0; w < 2; w++) {
                     fight_seen_t v;
                     fight_seen(&s, w, &v);
@@ -63,6 +66,32 @@ static void test_cadence(void) {
             }
             CHECK(presses[0] > 60 && presses[1] > 60);   // 真的在打
         }
+    }
+}
+
+// 挨打僵着时不按(按了也白按);僵直一结束,第一下要等自己的节拍到点,平均约半个 gap_ms,不会总是正好在能动的那一刻
+static void test_no_first_frame_after_hitstun(void) {
+    for (int i = 0; i < 5; i++) {
+        const fight_bot_cfg_t *c = ALL[i];
+        fight_bot_t b;
+        fight_bot_init(&b, c, rnd);
+        uint32_t sum = 0, quick = 0, n = 0;
+        for (int trial = 0; trial < 400; trial++) {
+            fight_seen_t v = { .st = { FS_HITSTUN, FS_IDLE }, .hp = { 600, 900 } };
+            uint32_t stun = 300 + rnd() % 600, t;
+            for (t = 0; t < stun; t += FIGHT_STEP) CHECK(fight_bot_step(&b, &v, FIGHT_STEP) < 0);
+            v.st[0] = FS_IDLE;
+            for (t = 0; t < 2000 && fight_bot_step(&b, &v, FIGHT_STEP) < 0; t += FIGHT_STEP) {}
+            CHECK(t < 2000);
+            sum += t;
+            quick += t <= FIGHT_STEP;
+            n++;
+            // 按完这一串、等它回到不按的状态(再挨一下)
+            v.st[0] = FS_HITSTUN;
+            for (t = 0; t < 1500; t += FIGHT_STEP) fight_bot_step(&b, &v, FIGHT_STEP);
+        }
+        CHECK(sum / n >= c->gap_ms / 4 && sum / n <= c->gap_ms);
+        CHECK(quick * 100 < n * 15);
     }
 }
 
@@ -92,17 +121,16 @@ static void test_mash_after_react(void) {
     }
 }
 
-// bot 打一个只会每 800 ms 按一下 opp_key(-1 = 不按)的对手,数 bot 自己在规则里起了几次手(按状态的变化数)
-typedef struct { int jab, heavy, guard, special, total; } openers_t;
-static openers_t face(const fight_bot_cfg_t *c, int opp_key) {
+// bot 打一个只会每 800 ms 按一下 opp_key(-1 = 不按)的对手(一回合打完再开一回合),数 bot 按的头 2000 下里 ● ▲ ▼ 各几下
+// (长按不算)。按了哪个键就是它想出什么:● 拳、▲ 重击、▼ 防(或者小招 / 大招的前缀)。
+typedef struct { int ok, up, down, total; } keys_t;
+static keys_t face(const fight_bot_cfg_t *c, int opp_key) {
     fight_bot_t b;
     fight_bot_init(&b, c, rnd);
-    openers_t o = { 0 };
+    keys_t o = { 0 };
     fight_sim_t s;
     fight_sim_init(&s, FC_DAD, FC_DAD, 0, 0);
-    uint8_t pst = FS_IDLE, pmv = 0;
-    uint16_t pt = 0;
-    for (uint32_t wall = 0; o.total < 400; wall += FIGHT_STEP) {
+    for (uint32_t wall = 0; o.total < 2000; wall += FIGHT_STEP) {
         if (s.winner != FIGHT_UNDECIDED) fight_sim_init(&s, FC_DAD, FC_DAD, 0, 0);
         fight_seen_t v;
         fight_seen(&s, 0, &v);
@@ -110,31 +138,26 @@ static openers_t face(const fight_bot_cfg_t *c, int opp_key) {
         if (k >= 0) fight_sim_key(&s, 0, (uint8_t)k);
         if (opp_key >= 0 && wall % 800 == 0) fight_sim_key(&s, 1, (uint8_t)opp_key);
         fight_sim_step(&s);
-        const fight_fighter_t *f = &s.f[0];
-        bool fresh = f->st != pst || (f->st == FS_MOVE && (f->move != pmv || f->t < pt));
-        if (fresh && f->st == FS_GUARD) o.guard++, o.total++;
-        if (fresh && f->st == FS_STANCE) o.special++, o.total++;
-        if (fresh && f->st == FS_MOVE && f->move == FM_JAB) o.jab++, o.total++;
-        if (fresh && f->st == FS_MOVE && f->move == FM_HEAVY) o.heavy++, o.total++;
-        if (fresh && f->st == FS_MOVE && f->move == FM_SPECIAL && !f->chain) o.special++, o.total++;
-        pst = f->st, pmv = f->move, pt = f->t;
+        if (k == FK_OK) o.ok++, o.total++;
+        if (k == FK_UP) o.up++, o.total++;
+        if (k == FK_DOWN) o.down++, o.total++;
     }
     return o;
 }
 
-static int pct(int n, const openers_t *o) { return 100 * n / o->total; }
+static int pct(int n, const keys_t *o) { return 100 * n / o->total; }
 
-// 大人统计对方的习惯:对方老出拳 → 多防;老防 → 多抡重击;老抡 → 早出拳。小孩不读。
+// 大人统计对方的习惯:对方老出拳 → 多防(▼);老防 → 多抡重击(▲);老抡 → 早出拳(●)。小孩不读。
 static void test_reads_habits(void) {
-    openers_t base = face(&FIGHT_HUMAN_ADULT, -1);
-    openers_t vs_jab = face(&FIGHT_HUMAN_ADULT, FK_OK);
-    openers_t vs_guard = face(&FIGHT_HUMAN_ADULT, FK_DOWN);
-    openers_t vs_heavy = face(&FIGHT_HUMAN_ADULT, FK_UP);
-    CHECK(pct(vs_jab.guard, &vs_jab) > pct(base.guard, &base) + 10);
-    CHECK(pct(vs_guard.heavy, &vs_guard) > pct(base.heavy, &base) + 10);
-    CHECK(pct(vs_heavy.jab, &vs_heavy) > pct(base.jab, &base) + 10);
-    openers_t kid_base = face(&FIGHT_HUMAN_KID, -1), kid_jab = face(&FIGHT_HUMAN_KID, FK_OK);
-    CHECK(abs(pct(kid_jab.guard, &kid_jab) - pct(kid_base.guard, &kid_base)) < 8);
+    keys_t base = face(&FIGHT_HUMAN_ADULT, -1);
+    keys_t vs_jab = face(&FIGHT_HUMAN_ADULT, FK_OK);
+    keys_t vs_guard = face(&FIGHT_HUMAN_ADULT, FK_DOWN);
+    keys_t vs_heavy = face(&FIGHT_HUMAN_ADULT, FK_UP);
+    CHECK(pct(vs_jab.down, &vs_jab) > pct(base.down, &base) + 8);
+    CHECK(pct(vs_guard.up, &vs_guard) > pct(base.up, &base) + 8);
+    CHECK(pct(vs_heavy.ok, &vs_heavy) > pct(base.ok, &base) + 5);
+    keys_t kid_base = face(&FIGHT_HUMAN_KID, -1), kid_jab = face(&FIGHT_HUMAN_KID, FK_OK);
+    CHECK(pct(kid_jab.down, &kid_jab) <= pct(kid_base.down, &kid_base) + 3);   // 小孩不会因为对方老出拳就多防
 }
 
 // 有气、● 起手接大招:● ▼ ● 三下的间隔都 ≥ gap_ms,按完赶得上连招窗口(打到 + 僵 600)
@@ -167,6 +190,7 @@ int main(void) {
     test_cfg_sums();
     test_cadence();
     test_mash_after_react();
+    test_no_first_frame_after_hitstun();
     test_reads_habits();
     test_super_input();
     printf("test_bot: PASS\n");

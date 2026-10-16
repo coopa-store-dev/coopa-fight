@@ -1,7 +1,7 @@
 // tests/test_balance.c —— 调数值:按真人的手速(大人 / 小孩模型,不按电脑的)打很多场,打印统计并检查计划 Task 5 的目标。
 // 直接驱动 fight_sim(两边的 bot 每 10 ms 看一眼、按键走 fight_sim_key),一场先赢 FIGHT_WIN 回合、气带到下一回合、
 // 平局重打这一回合;一场的时长按真的时间算(含特写、倒数、回合之间)。种子固定,结果可重现。
-// 场数可以用第一个参数改(默认 200;两两胜率每对 (A,B)+(B,A) 合起来 5 倍,默认 1000)。
+// 场数可以用第一个参数改(默认 200;大人两两每对 (A,B)+(B,A) 合起来、小孩对大人每格,都是 5 倍,默认 1000)。
 #include <stdio.h>
 #include <stdlib.h>
 
@@ -10,7 +10,8 @@
 
 static const char *NAME[FC_COUNT] = { "kid", "dad", "granny", "grandpa" };
 
-#define KID_WIN_MIN 25   // 小孩对大人每对胜率的下限(计划 Task 5)
+#define KID_WIN_MIN 25   // 小孩对大人 16 格的平均胜率下限(计划 Task 5)
+#define KID_CELL_MIN 20  // 小孩对大人每一格的下限(控制方裁定)
 
 static uint32_t s_x = 1;
 static uint32_t rnd(void) {
@@ -230,21 +231,21 @@ int main(int argc, char **argv) {
     double avg_s = ta.ms / ta.n / 1000;
     expect(avg_s >= 90 && avg_s <= 210, "一场平均 90–210 秒");
 
-    // 2. 小孩对大人:10 对角色(小孩用 A、大人用 B 和小孩用 B、大人用 A 合起来 pair_n 场;同一个角色就是 pair_n 场)
-    printf("== 小孩对大人:每对 %d 场,小孩胜率 / 小孩打中过大招的场 ==\n ", pair_n);
+    // 2. 小孩对大人:16 种组合(小孩的角色 × 大人的角色)各 pair_n 场(两边轮着坐 0 号);每格 ≥ KID_CELL_MIN,16 格平均 ≥ KID_WIN_MIN
+    printf("== 小孩(行)对大人(列):每格 %d 场,小孩胜率 / 小孩打中过大招的场 ==\n", pair_n);
     tally_t tk = { 0 };
     uint32_t kid_try = 0, kid_ok = 0, ad_try = aa_try, ad_ok = aa_ok;
-    double kid_min = 100;
-    for (uint8_t ca = 0; ca < FC_COUNT; ca++) {
-        for (uint8_t cb = ca; cb < FC_COUNT; cb++) {
-            s_x = 2000u + 10u * ca + cb;
+    double kid_min = 100, kid_sum = 0;
+    for (uint8_t ck = 0; ck < FC_COUNT; ck++) {
+        printf("  %-8s", NAME[ck]);
+        for (uint8_t cd = 0; cd < FC_COUNT; cd++) {
+            s_x = 2000u + 10u * ck + cd;
             uint32_t won = 0, sup = 0;
             for (int i = 0; i < pair_n; i++) {
-                bool swap = (i >> 1) & 1;   // 每两场换一次谁用哪个角色(一场里两边轮着坐 0 号)
                 player_bot(&A, &FIGHT_HUMAN_KID);
                 player_bot(&B, &FIGHT_HUMAN_ADULT);
                 result_t r;
-                won += play(&A, swap ? cb : ca, &B, swap ? ca : cb, i, &r);
+                won += play(&A, ck, &B, cd, i, &r);
                 tally(&tk, &r);
                 sup += r.supers[0] > 0;
                 kid_try += A.bot.super_try;
@@ -253,15 +254,21 @@ int main(int argc, char **argv) {
                 ad_ok += B.bot.super_ok;
             }
             double w = pc(won, (uint32_t)pair_n), sp = pc(sup, (uint32_t)pair_n);
+            kid_sum += w;
             if (w < kid_min) kid_min = w;
-            bool good = expect(w >= KID_WIN_MIN, "小孩对大人胜率 ≥ KID_WIN_MIN");
+            bool good = expect(w >= KID_CELL_MIN, "小孩对大人每格胜率 ≥ KID_CELL_MIN");
             good = expect(sp >= 50, "小孩每场打中过大招的场 ≥ 50%") && good;
-            printf(" %s-%s %2.0f%%/%2.0f%%%s", NAME[ca], NAME[cb], w, sp, mark(good));
+            printf("  %-7s %2.0f%%/%2.0f%%%s", NAME[cd], w, sp, mark(good));
         }
+        printf("\n");
     }
-    printf("\n");
     tally_print(&tk, "小孩", "大人");
-    printf("  小孩对大人最低 %.0f%%(断言 ≥ %d%%)\n", kid_min, KID_WIN_MIN);
+    double kid_mean = kid_sum / 16, kid_sup = tk.ev[FE_SUPER][0] / tk.n, kms = tk.ms / tk.n / 1000;
+    bool gm = expect(kid_mean >= KID_WIN_MIN, "小孩对大人 16 格平均 ≥ KID_WIN_MIN");
+    bool gs = expect(kid_sup <= 2.0, "小孩每场大招 ≤ 2.0(设计 §4.3「一两次」)");
+    bool gl = expect(kms >= 90 && kms <= 240, "小孩对大人一场平均 90–240 秒");
+    printf("  小孩胜率:最低 %.0f%%(每格 ≥ %d%%)、平均 %.1f%%%s(≥ %d%%);小孩每场大招 %.2f%s(≤ 2.0);一场 %.0f 秒%s\n", kid_min,
+           KID_CELL_MIN, kid_mean, mark(gm), KID_WIN_MIN, kid_sup, mark(gs), kms, mark(gl));
 
     // 3. ● ▼ ● 在 ● 打中的前提下出了大招
     double sa = pc(ad_ok, ad_try), sk = pc(kid_ok, kid_try);

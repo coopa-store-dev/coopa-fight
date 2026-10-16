@@ -141,7 +141,7 @@ static void test_super_on_block_is_guard_jab(void) {
     key(0, FK_OK);
     run_to(200);
     CHECK(S.f[0].st == FS_BLOCKSTUN && ev_by(FE_BLOCK, 0) == 1);
-    run_to(850);
+    run_to(200 + 100 + 250 + FIGHT_BLOCKSTUN);   // 被挡:active + recovery + FIGHT_BLOCKSTUN
     CHECK(S.f[0].st == FS_MOVE && S.f[0].move == FM_JAB && S.f[0].qn == 0);
     CHECK(S.f[0].guard_cool == FIGHT_GUARD_COOL);
     run_to(3000);
@@ -438,7 +438,7 @@ static void test_special_from_guard(void) {
     run_to(600);
     key(0, FK_OK);
     CHECK(S.f[0].move == FM_JAB2);
-    run_to(750);
+    run_to(600 + fight_char(FC_KID)->mv[FM_JAB2].startup);
     CHECK(S.f[1].hp == hp_max(1) - dmg(FC_KID, FM_SPECIAL) - dmg(FC_KID, FM_JAB2) && S.f[0].chain == 2);
 
     // 爸爸肩撞:砸开防御,对方只僵不晕

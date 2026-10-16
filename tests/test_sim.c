@@ -29,6 +29,7 @@ static void run_to(uint32_t clock) { while (S.clock < clock && S.winner == FIGHT
 static void key(int who, uint8_t k) { fight_sim_key(&S, (uint8_t)who, k); }
 static int hp_max(int who) { return fight_char(S.f[who].ch)->hp; }
 static int dmg(uint8_t c, uint8_t m) { return fight_char(c)->mv[m].dmg; }   // 伤害读出招表(数值会调)
+static uint32_t su(uint8_t c, uint8_t m) { return fight_char(c)->mv[m].startup; }   // 出手也读出招表
 
 // 奶奶的轻拳 200 ms 打到,扣轻拳的血,对方僵 600
 static void test_jab_hits_idle(void) {
@@ -61,9 +62,9 @@ static void test_guard_blocks_jab(void) {
     CHECK(S.f[0].gauge == FIGHT_GAUGE_BLOCK && S.f[1].gauge == FIGHT_GAUGE_BLOCK);
     CHECK(S.f[0].chain == 0 && !S.f[0].chain_open);
     CHECK(ev_by(FE_BLOCK, 0) == 1 && ev(FE_HIT) == 0);
-    run_to(200 + 650 - 10);
+    run_to(200 + 100 + 250 + FIGHT_BLOCKSTUN - 10);
     CHECK(S.f[0].st == FS_BLOCKSTUN);
-    run_to(200 + 650);
+    run_to(200 + 100 + 250 + FIGHT_BLOCKSTUN);
     CHECK(S.f[0].st == FS_IDLE);
 }
 
@@ -185,13 +186,14 @@ static void test_buffered_on_block(void) {
     key(0, FK_OK);
     run_to(200);
     CHECK(S.f[0].st == FS_BLOCKSTUN && S.f[0].qn == 2);
-    run_to(840);
+    uint32_t free_at = 200 + 100 + 250 + FIGHT_BLOCKSTUN;   // 被挡:active + recovery + FIGHT_BLOCKSTUN
+    run_to(free_at - 10);
     CHECK(S.f[0].st == FS_BLOCKSTUN && S.f[0].guard_cool == 0);
-    run_to(850);
+    run_to(free_at);
     CHECK(S.f[0].st == FS_MOVE && S.f[0].move == FM_JAB && S.f[0].qn == 0);
     CHECK(S.f[0].guard_cool == FIGHT_GUARD_COOL);   // 盾举起来又被这一拳放下了
     CHECK(ev_by(FE_START, 0) == 2);
-    run_to(1050);
+    run_to(free_at + 200);
     CHECK(S.f[1].hp == hp_max(1) - dmg(FC_GRANNY, FM_JAB));   // 对方的盾早放下了
 
     // 挡住的一方在收招完之前反打:打中,提前按的键作废
@@ -203,8 +205,8 @@ static void test_buffered_on_block(void) {
     run_to(120);
     key(0, FK_OK);
     run_to(400);
-    key(1, FK_OK);   // 放下盾出拳,550 打到
-    run_to(550);
+    key(1, FK_OK);   // 放下盾出拳,400 + 库巴轻拳出手 打到
+    run_to(400 + su(FC_KID, FM_JAB));
     CHECK(S.f[0].hp == hp_max(0) - dmg(FC_KID, FM_JAB) && S.f[0].st == FS_HITSTUN && S.f[0].qn == 0);
     run_to(2000);
     CHECK(ev_by(FE_START, 0) == 1);
@@ -217,7 +219,7 @@ static void test_guard_then_jab(void) {
     key(0, FK_OK);
     CHECK(S.f[0].st == FS_MOVE && S.f[0].move == FM_JAB);
     CHECK(S.f[0].guard_cool == FIGHT_GUARD_COOL && !S.f[0].long_guard);
-    run_to(250);
+    run_to(100 + su(FC_KID, FM_JAB));
     CHECK(S.f[1].hp == hp_max(1) - dmg(FC_KID, FM_JAB));
 }
 
@@ -410,7 +412,7 @@ static void test_prefix_binds_next_key(void) {
     key(0, FK_OK);
     run_to(200);
     key(0, FK_UP);
-    run_to(250);
+    run_to(100 + su(FC_KID, FM_JAB));   // ● 被挡
     CHECK(S.f[0].st == FS_BLOCKSTUN && S.f[0].qn == 1);
     while (S.f[0].st == FS_BLOCKSTUN) fight_sim_step(&S);
     CHECK(S.f[0].st == FS_MOVE && S.f[0].move == FM_HEAVY);
@@ -516,7 +518,7 @@ static void test_no_infinite_lock(void) {
             bool acted = false;
             for (uint32_t t = 0; t < 5000 && !acted; t += FIGHT_STEP) {
                 if (t >= 200 && t % 200 == 0) key(0, (t / 200) % 2 ? FK_DOWN : FK_OK);
-                if (t % 200 == ph) key(1, (n++ % 2) ? FK_DOWN : FK_OK);
+                if (t >= 300 && t % 200 == ph) key(1, (n++ % 2) ? FK_DOWN : FK_OK);   // 第一拳打中以后才开始按
                 fight_sim_step(&S);
                 uint8_t st = S.f[1].st;
                 if (!hit_at && st == FS_HITSTUN) hit_at = S.clock;
@@ -530,7 +532,7 @@ static void test_no_infinite_lock(void) {
     }
 }
 
-// 规则改了以后真的连招照样连上:● ● ● 三连、● ● ▲、● ▼ ●(有气)大招
+// 规则改了以后真的连招照样连上:● ● ● 三连、● ▼ ●(有气)大招、● ▲ 连段重击、库巴弹弓接 ●、爷爷太极接住接 ●
 static void test_chains_still_connect(void) {
     for (uint8_t c0 = 0; c0 < FC_COUNT; c0++) {
         start(c0, FC_KID, 0, 0);
@@ -553,7 +555,41 @@ static void test_chains_still_connect(void) {
         CHECK(S.freeze && S.f[0].st == FS_SUPER_OUT);
         run_to(3000);
         CHECK(ev_by(FE_SUPER, 0) == 1 && S.f[1].hp == hp_max(1) - (d->mv[FM_JAB].dmg + d->mv[FM_SUPER].dmg));
+
+        start(c0, FC_KID, 0, 0);   // ● ▲:连段重击
+        key(0, FK_OK);
+        run_to(200);
+        key(0, FK_UP);
+        run_to(3000);
+        CHECK(ev_by(FE_HIT, 0) == 2 && ev(FE_WHIFF) == 0);
+        CHECK(S.f[1].hp == hp_max(1) - (d->mv[FM_JAB].dmg + d->mv[FM_HEAVY_LINK].dmg));
     }
+
+    // 库巴弹弓打中开连招,接 ●(第二拳)
+    start(FC_KID, FC_DAD, 0, 0);
+    key(0, FK_DOWN);
+    run_to(100);
+    key(0, FK_UP);
+    run_to(100 + su(FC_KID, FM_SPECIAL));
+    CHECK(S.f[1].st == FS_HITSTUN && S.f[0].chain_open);
+    key(0, FK_OK);
+    run_to(3000);
+    CHECK(ev_by(FE_HIT, 0) == 2 && ev(FE_WHIFF) == 0);
+    CHECK(S.f[1].hp == hp_max(1) - dmg(FC_KID, FM_SPECIAL) - dmg(FC_KID, FM_JAB2));
+
+    // 爷爷太极接住(对方僵着),接 ●(第二拳)
+    start(FC_GRANDPA, FC_GRANNY, 0, 0);
+    key(0, FK_DOWN);
+    run_to(50);
+    key(0, FK_UP);
+    run_to(100);
+    key(1, FK_OK);
+    run_to(100 + su(FC_GRANNY, FM_JAB));
+    CHECK(ev_by(FE_COUNTER, 0) == 1 && S.f[1].st == FS_HITSTUN && S.f[0].chain_open);
+    key(0, FK_OK);
+    run_to(3000);
+    CHECK(ev_by(FE_HIT, 0) == 1 && ev_by(FE_WHIFF, 0) == 0);
+    CHECK(S.f[1].hp == hp_max(1) - dmg(FC_GRANDPA, FM_SPECIAL) - dmg(FC_GRANDPA, FM_JAB2));
 }
 
 int main(void) {

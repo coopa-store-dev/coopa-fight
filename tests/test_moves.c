@@ -38,6 +38,16 @@ static void test_heavy_armor(void) {
     }
 }
 
+// 爸爸的重击抡得最快、最痛(设计 §6):四个人里出手最短、伤害最高
+static void test_dad_heavy_fastest_hardest(void) {
+    const fight_move_def_t *d = &fight_char(FC_DAD)->mv[FM_HEAVY];
+    for (int c = 0; c < FC_COUNT; c++) {
+        if (c == FC_DAD) continue;
+        const fight_move_def_t *h = &fight_char(c)->mv[FM_HEAVY];
+        CHECK(d->startup < h->startup && d->dmg > h->dmg);
+    }
+}
+
 static void test_super_dmg_third(void) {
     for (int c = 0; c < FC_COUNT; c++) {
         const fight_char_def_t *d = fight_char(c);
@@ -60,6 +70,7 @@ int main(void) {
     test_all_moves_have_timing();
     test_combo_fits_kid();
     test_heavy_armor();
+    test_dad_heavy_fastest_hardest();
     test_super_dmg_third();
     test_char_out_of_range();
     test_hp_fits_snapshot();

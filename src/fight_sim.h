@@ -22,13 +22,13 @@
 #define FIGHT_GAUGE_BAR 1000
 #define FIGHT_GAUGE_MAX 3000
 #define FIGHT_GUARD_COOL 400
-#define FIGHT_BLOCKSTUN 300   // 被挡住的轻拳:出拳的人多僵这么久
+#define FIGHT_BLOCKSTUN 500   // 被挡住的轻拳:出拳的人多僵这么久
 #define FIGHT_PREFIX_MS 350   // ▼ 前缀:按 ▼ 后这么久内的 ▲ / ● 算小招 / 大招
 #define FIGHT_ROUND_MS 60000
 #define FIGHT_LATE_MAX 400    // 联机晚到的键最多按本来的时刻补算这么久
-#define FIGHT_GAUGE_HIT 10    // 打中
-#define FIGHT_GAUGE_HURT 30   // 挨打
-#define FIGHT_GAUGE_BEHIND 60 // 挨打时血比对方少 FIGHT_BEHIND 以上再加
+#define FIGHT_GAUGE_HIT 6     // 打中
+#define FIGHT_GAUGE_HURT 15   // 挨打
+#define FIGHT_GAUGE_BEHIND 50 // 挨打时血比对方少 FIGHT_BEHIND 以上再加
 #define FIGHT_BEHIND 200      // 满血 1000 制
 #define FIGHT_GAUGE_BLOCK 5   // 挡住、被挡都加
 #define FIGHT_EVQ 16
