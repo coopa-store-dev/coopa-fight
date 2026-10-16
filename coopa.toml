@@ -1,0 +1,11 @@
+id = "fight"
+name = "库巴格斗"
+version = "1.0.0"
+sdk = 4
+kit_api = 2
+app = "fight_app"
+milestones = [
+  "第一次打出大招",
+  "赢一场",
+  "赢 10 场",
+]

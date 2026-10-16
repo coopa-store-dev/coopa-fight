@@ -1,0 +1,9 @@
+{
+  "name": "Coopa 游戏开发",
+  "image": "emscripten/emsdk:6.0.11",
+  "postCreateCommand": "bash .devcontainer/setup.sh",
+  "forwardPorts": [8790],
+  "portsAttributes": {
+    "8790": { "label": "Coopa 卡", "onAutoForward": "openBrowser" }
+  }
+}

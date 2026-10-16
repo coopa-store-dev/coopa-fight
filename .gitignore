@@ -1,0 +1,3 @@
+# coopa 的构建产物、字库缓存、检查结果
+.coopa/
+tests/.build/

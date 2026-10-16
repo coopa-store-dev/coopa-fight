@@ -1,0 +1,59 @@
+// tests/test_moves.c —— 出招表的数值约束(宿主测试)。
+#include <stdio.h>
+#include <stdlib.h>
+
+#include "fight_moves.h"
+
+#define CHECK(c) do { if (!(c)) { \
+    printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #c); exit(1); } } while (0)
+
+// 每个角色每个招都有出手和有效时间;唯一例外是爷爷的太极(架势,startup = 0)
+static void test_all_moves_have_timing(void) {
+    for (int c = 0; c < FC_COUNT; c++) {
+        const fight_char_def_t *d = fight_char(c);
+        CHECK(d->hp > 0 && d->guard_ms > 0 && d->guard_long_ms > d->guard_ms);
+        for (int m = 0; m < FM_COUNT; m++) {
+            if (!(c == FC_GRANDPA && m == FM_SPECIAL)) CHECK(d->mv[m].startup > 0);
+            CHECK(d->mv[m].active > 0);
+            CHECK(d->mv[m].hits >= 1);
+        }
+    }
+}
+
+// 小孩一秒 3.5 下:间隔 286 ms × 2 = 572,按下 ● 起算要赶在僵直结束前
+static void test_combo_fits_kid(void) {
+    for (int c = 0; c < FC_COUNT; c++) {
+        const fight_move_def_t *j = &fight_char(c)->mv[FM_JAB];
+        CHECK(572 <= j->startup + j->hitstun);
+    }
+}
+
+static void test_heavy_armor(void) {
+    for (int c = 0; c < FC_COUNT; c++) {
+        const fight_move_def_t *h = &fight_char(c)->mv[FM_HEAVY];
+        CHECK(h->armor_from > 0 && h->armor_from < h->startup);
+    }
+}
+
+static void test_super_dmg_third(void) {
+    for (int c = 0; c < FC_COUNT; c++) {
+        const fight_char_def_t *d = fight_char(c);
+        CHECK(d->mv[FM_SUPER].dmg * 100 >= d->hp * 30);
+        CHECK(d->mv[FM_SUPER].dmg * 100 <= d->hp * 37);
+    }
+}
+
+static void test_char_out_of_range(void) {
+    CHECK(fight_char(9) == fight_char(FC_KID));
+    CHECK(fight_char(255) == fight_char(FC_KID));
+}
+
+int main(void) {
+    test_all_moves_have_timing();
+    test_combo_fits_kid();
+    test_heavy_armor();
+    test_super_dmg_third();
+    test_char_out_of_range();
+    printf("test_moves: PASS\n");
+    return 0;
+}

@@ -1,0 +1,39 @@
+# 自查:每次推送都用官方检查跑一遍(和审核时一样;审核只认官网触发的那次)。
+# 结果在 Actions 页面;截图、日志、能玩的网页版在这次运行的 Artifacts 里。模板仓库自己不跑(它的 id 还是 mygame)。
+# 刚用模板建好、还没改名(id 还是 mygame)时也不跑:跳过,提示先 coopa rename(不然一建仓库就是红叉)。
+name: 自查
+
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  name:
+    if: github.repository != 'coopa-store-dev/coopa-game-template'
+    runs-on: ubuntu-latest
+    outputs:
+      renamed: ${{ steps.id.outputs.renamed }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          sparse-checkout: coopa.toml
+          sparse-checkout-cone-mode: false
+      - id: id
+        run: |
+          if grep -Eq '^id[[:space:]]*=[[:space:]]*"mygame"' coopa.toml; then
+            echo "::notice::id 还是模板的 mygame:先运行 coopa rename 你的id,推送后才跑官方检查"
+            echo "renamed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "renamed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  check:
+    needs: name
+    if: needs.name.outputs.renamed == 'true'
+    uses: coopa-store-dev/coopa-store/.github/workflows/check-core.yml@main
+    with:
+      repo: ${{ github.repository }}
+      ref: ${{ github.sha }}
