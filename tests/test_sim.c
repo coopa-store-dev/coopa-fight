@@ -28,8 +28,9 @@ static void start(uint8_t c0, uint8_t c1, uint16_t g0, uint16_t g1) {
 static void run_to(uint32_t clock) { while (S.clock < clock && S.winner == FIGHT_UNDECIDED) fight_sim_step(&S); }
 static void key(int who, uint8_t k) { fight_sim_key(&S, (uint8_t)who, k); }
 static int hp_max(int who) { return fight_char(S.f[who].ch)->hp; }
+static int dmg(uint8_t c, uint8_t m) { return fight_char(c)->mv[m].dmg; }   // 伤害读出招表(数值会调)
 
-// 奶奶的轻拳 200 ms 打到,扣 40,对方僵 600
+// 奶奶的轻拳 200 ms 打到,扣轻拳的血,对方僵 600
 static void test_jab_hits_idle(void) {
     start(FC_GRANNY, FC_KID, 0, 0);
     key(0, FK_OK);
@@ -37,7 +38,7 @@ static void test_jab_hits_idle(void) {
     run_to(190);
     CHECK(S.f[1].hp == hp_max(1) && S.f[1].st == FS_IDLE);
     run_to(200);
-    CHECK(S.f[1].hp == hp_max(1) - 40);
+    CHECK(S.f[1].hp == hp_max(1) - dmg(FC_GRANNY, FM_JAB));
     CHECK(S.f[1].st == FS_HITSTUN && S.f[1].dur == 600);
     CHECK(S.f[0].chain == 1 && S.f[0].chain_open);
     CHECK(S.f[0].gauge == FIGHT_GAUGE_HIT && S.f[1].gauge == FIGHT_GAUGE_HURT);
@@ -76,7 +77,7 @@ static void test_heavy_breaks_guard(void) {
     CHECK(S.f[1].st == FS_GUARD && S.f[1].hp == hp_max(1));
     run_to(600);
     CHECK(ev_by(FE_GUARD_BREAK, 0) == 1 && ev(FE_BLOCK) == 0);
-    CHECK(S.f[1].hp == hp_max(1) - 120);
+    CHECK(S.f[1].hp == hp_max(1) - dmg(FC_KID, FM_HEAVY));
     CHECK(S.f[1].st == FS_DIZZY && S.f[1].mash_left == FIGHT_DIZZY_BREAK && S.f[1].protect);   // 砸开防御:晕
     CHECK(S.f[1].guard_cool == FIGHT_GUARD_COOL);
     CHECK(S.f[0].chain == 0);   // 重击不开连招
@@ -88,7 +89,7 @@ static void test_jab_interrupts_heavy_early(void) {
     key(1, FK_UP);
     key(0, FK_OK);
     run_to(200);
-    CHECK(S.f[1].st == FS_HITSTUN && S.f[1].hp == hp_max(1) - 40);
+    CHECK(S.f[1].st == FS_HITSTUN && S.f[1].hp == hp_max(1) - dmg(FC_GRANNY, FM_JAB));
     run_to(1500);
     CHECK(S.f[0].hp == hp_max(0));
     CHECK(ev(FE_HIT) == 1 && ev(FE_GUARD_BREAK) == 0);
@@ -101,11 +102,11 @@ static void test_heavy_armor_late(void) {
     run_to(200);
     key(0, FK_OK);
     run_to(400);
-    CHECK(S.f[1].hp == hp_max(1) - 40);
+    CHECK(S.f[1].hp == hp_max(1) - dmg(FC_GRANNY, FM_JAB));
     CHECK(S.f[1].st == FS_MOVE && S.f[1].move == FM_HEAVY);
     CHECK(S.f[0].chain == 0 && !S.f[0].chain_open);
     run_to(600);
-    CHECK(S.f[0].hp == hp_max(0) - 120);
+    CHECK(S.f[0].hp == hp_max(0) - dmg(FC_KID, FM_HEAVY));
     CHECK(S.f[0].st == FS_HITSTUN && S.f[0].dur == 500);
     CHECK(ev_by(FE_HIT, 0) == 1 && ev_by(FE_HIT, 1) == 1);
     CHECK(S.f[0].gauge == FIGHT_GAUGE_HIT + FIGHT_GAUGE_HURT);
@@ -114,12 +115,12 @@ static void test_heavy_armor_late(void) {
 
 // 重击后半段只扛得住轻拳:重击、小招打到照样打断
 static void test_heavy_armor_jabs_only(void) {
-    // 爸爸重击 500 打到,库巴的重击抡到 500(过了 armor_from 300)也被打断
+    // 爸爸重击 550 打到,库巴的重击抡到 550(过了 armor_from 300、还没到 600)也被打断
     start(FC_KID, FC_DAD, 0, 0);
     key(0, FK_UP);
     key(1, FK_UP);
-    run_to(500);
-    CHECK(S.f[0].st == FS_HITSTUN && S.f[0].hp == hp_max(0) - 150);
+    run_to(550);
+    CHECK(S.f[0].st == FS_HITSTUN && S.f[0].hp == hp_max(0) - dmg(FC_DAD, FM_HEAVY));
     run_to(2000);
     CHECK(S.f[1].hp == hp_max(1) && ev_by(FE_HIT, 0) == 0);
 
@@ -131,12 +132,12 @@ static void test_heavy_armor_jabs_only(void) {
     key(1, FK_UP);
     CHECK(S.f[1].move == FM_SPECIAL);
     run_to(360);
-    CHECK(S.f[0].st == FS_HITSTUN && S.f[0].hp == hp_max(0) - 80);
+    CHECK(S.f[0].st == FS_HITSTUN && S.f[0].hp == hp_max(0) - dmg(FC_DAD, FM_SPECIAL));
     run_to(2000);
     CHECK(S.f[1].hp == hp_max(1));
 }
 
-// 提前按 ● ▲:轻拳打中后都连上,对方一直僵着,伤害 40 + 40 + 100
+// 提前按 ● ▲:轻拳打中后都连上,对方一直僵着,伤害 轻拳 + 第二拳 + 连段重击
 static void test_chain_jab_jab_heavy(void) {
     start(FC_GRANNY, FC_KID, 0, 0);
     key(0, FK_OK);
@@ -151,11 +152,12 @@ static void test_chain_jab_jab_heavy(void) {
         CHECK(S.f[1].st == FS_HITSTUN);
         fight_sim_step(&S);
     }
+    int jjh = dmg(FC_GRANNY, FM_JAB) + dmg(FC_GRANNY, FM_JAB2) + dmg(FC_GRANNY, FM_HEAVY_LINK);
     CHECK(S.f[0].move == FM_HEAVY_LINK);
-    CHECK(S.f[1].hp == hp_max(1) - 180);
+    CHECK(S.f[1].hp == hp_max(1) - jjh);
     CHECK(S.f[0].chain == 3 && !S.f[0].chain_open);
     run_to(3000);
-    CHECK(S.f[1].hp == hp_max(1) - 180);
+    CHECK(S.f[1].hp == hp_max(1) - jjh);
     CHECK(ev_by(FE_HIT, 0) == 3 && ev_by(FE_START, 0) == 3);
     CHECK(S.f[0].st == FS_IDLE && S.f[1].st == FS_IDLE && S.f[0].qn == 0);
 
@@ -169,7 +171,7 @@ static void test_chain_jab_jab_heavy(void) {
     key(1, FK_DOWN);
     CHECK(S.f[1].st == FS_HITSTUN);
     run_to(990);
-    CHECK(S.f[1].hp == hp_max(1) - 80 && ev(FE_BLOCK) == 0);
+    CHECK(S.f[1].hp == hp_max(1) - dmg(FC_GRANNY, FM_JAB) - dmg(FC_GRANNY, FM_JAB2) && ev(FE_BLOCK) == 0);
 }
 
 // ● 被挡:提前按的 ▼ ● 收招完才变成举盾 + 一拳
@@ -190,7 +192,7 @@ static void test_buffered_on_block(void) {
     CHECK(S.f[0].guard_cool == FIGHT_GUARD_COOL);   // 盾举起来又被这一拳放下了
     CHECK(ev_by(FE_START, 0) == 2);
     run_to(1050);
-    CHECK(S.f[1].hp == hp_max(1) - 40);   // 对方的盾早放下了
+    CHECK(S.f[1].hp == hp_max(1) - dmg(FC_GRANNY, FM_JAB));   // 对方的盾早放下了
 
     // 挡住的一方在收招完之前反打:打中,提前按的键作废
     start(FC_GRANNY, FC_KID, 0, 0);
@@ -203,7 +205,7 @@ static void test_buffered_on_block(void) {
     run_to(400);
     key(1, FK_OK);   // 放下盾出拳,550 打到
     run_to(550);
-    CHECK(S.f[0].hp == hp_max(0) - 40 && S.f[0].st == FS_HITSTUN && S.f[0].qn == 0);
+    CHECK(S.f[0].hp == hp_max(0) - dmg(FC_KID, FM_JAB) && S.f[0].st == FS_HITSTUN && S.f[0].qn == 0);
     run_to(2000);
     CHECK(ev_by(FE_START, 0) == 1);
 }
@@ -216,7 +218,7 @@ static void test_guard_then_jab(void) {
     CHECK(S.f[0].st == FS_MOVE && S.f[0].move == FM_JAB);
     CHECK(S.f[0].guard_cool == FIGHT_GUARD_COOL && !S.f[0].long_guard);
     run_to(250);
-    CHECK(S.f[1].hp == hp_max(1) - 40);
+    CHECK(S.f[1].hp == hp_max(1) - dmg(FC_KID, FM_JAB));
 }
 
 // 冷却里按 ▼ 不举盾,但时刻照记(0.35 秒内的 ▲ 仍是小招)
@@ -246,7 +248,7 @@ static void test_late_key_window(void) {
     fight_sim_key_at(&S, 0, FK_OK, 300);   // 本来 700 按的:对方还僵着
     CHECK(S.f[0].move == FM_JAB2);
     run_to(1200);
-    CHECK(S.f[1].hp == hp_max(1) - 80 && S.f[0].chain == 2);
+    CHECK(S.f[1].hp == hp_max(1) - dmg(FC_GRANNY, FM_JAB) - dmg(FC_GRANNY, FM_JAB2) && S.f[0].chain == 2);
 
     // 同样的时刻按、不晚:窗口早关了,是一记新的轻拳
     start(FC_GRANNY, FC_KID, 0, 0);
@@ -328,19 +330,19 @@ static void test_trade(void) {
     run_to(200);
     CHECK(ev(FE_TRADE) == 1 && ev(FE_HIT) == 0);
     for (int i = 0; i < 2; i++) {
-        CHECK(S.f[i].hp == hp_max(i) - 40);
+        CHECK(S.f[i].hp == hp_max(i) - dmg(FC_GRANNY, FM_JAB));
         CHECK(S.f[i].st == FS_HITSTUN && S.f[i].dur == 600);
         CHECK(S.f[i].qn == 0 && S.f[i].chain == 0 && !S.f[i].chain_open);
         CHECK(S.f[i].gauge == FIGHT_GAUGE_HIT + FIGHT_GAUGE_HURT);
     }
     run_to(3000);
-    CHECK(S.f[0].hp == hp_max(0) - 40 && S.f[1].hp == hp_max(1) - 40);
+    CHECK(S.f[0].hp == hp_max(0) - dmg(FC_GRANNY, FM_JAB) && S.f[1].hp == hp_max(1) - dmg(FC_GRANNY, FM_JAB));
     CHECK(S.f[0].st == FS_IDLE && S.f[1].st == FS_IDLE && ev(FE_START) == 2);
 }
 
 // 叠着按冒出的「幻影」●:连按 ● ▼ ● 再多一个 ●,不崩,最多多一拳
 static void test_overlap_extra_jab(void) {
-    // 打中、没气:▼ ● 是举盾 + 一拳(新的一拳,对方还僵着,打中),多的 ● 接在它后面
+    // 打中、没气:▼ ● 是举盾 + 一拳(新的一拳不是连招,对方还僵着 → 打空),多的 ● 接在它后面(对方缓过来了,打中)
     start(FC_GRANNY, FC_KID, 0, 0);
     key(0, FK_OK);
     run_to(60);
@@ -350,8 +352,8 @@ static void test_overlap_extra_jab(void) {
     run_to(180);
     key(0, FK_OK);
     run_to(3000);
-    CHECK(ev_by(FE_START, 0) == 3 && ev_by(FE_HIT, 0) == 3);
-    CHECK(S.f[1].hp == hp_max(1) - (40 + 40 + 40));
+    CHECK(ev_by(FE_START, 0) == 3 && ev_by(FE_HIT, 0) == 2 && ev_by(FE_WHIFF, 0) == 1);
+    CHECK(S.f[1].hp == hp_max(1) - 2 * dmg(FC_GRANNY, FM_JAB));
     CHECK(S.f[0].st == FS_IDLE && S.f[0].qn == 0 && S.f[1].st == FS_IDLE);
 
     // 被挡:收招完举盾、出拳,多的那个 ● 再一拳(这一拳打中,接成连招)
@@ -366,7 +368,7 @@ static void test_overlap_extra_jab(void) {
     key(0, FK_OK);
     run_to(3000);
     CHECK(ev_by(FE_START, 0) == 3 && ev_by(FE_BLOCK, 0) == 1);
-    CHECK(S.f[1].hp >= hp_max(1) - 80);
+    CHECK(S.f[1].hp >= hp_max(1) - dmg(FC_GRANNY, FM_JAB) - dmg(FC_GRANNY, FM_JAB2));
     CHECK(S.f[0].st == FS_IDLE && S.f[0].qn == 0);
 
     // 打中、有两格气:● ▼ ● 出一次大招;多的 ● 前面不是 ▼,不会再试一次大招(特写前排着的键作废)
@@ -383,7 +385,7 @@ static void test_overlap_extra_jab(void) {
     run_to(1500);
     CHECK(ev_by(FE_SUPER, 0) == 1 && ev_by(FE_START, 0) == 1);
     CHECK(S.f[0].gauge == 2000 + FIGHT_GAUGE_HIT - FIGHT_GAUGE_BAR);
-    CHECK(S.f[1].st == FS_DIZZY && S.f[1].hp == hp_max(1) - 40 - 330);
+    CHECK(S.f[1].st == FS_DIZZY && S.f[1].hp == hp_max(1) - dmg(FC_GRANNY, FM_JAB) - dmg(FC_GRANNY, FM_SUPER));
 }
 
 // ▼ 只管紧跟在它后面的那个键:▼ ● ● 连按,第二个 ● 离 ▼ 不到 0.35 秒也只是连招第二拳
@@ -397,7 +399,8 @@ static void test_prefix_binds_next_key(void) {
     run_to(300);
     CHECK(S.f[0].move == FM_JAB2 && ev(FE_SUPER) == 0);
     run_to(3000);
-    CHECK(ev(FE_SUPER) == 0 && S.f[1].hp == hp_max(1) - 80 && S.f[0].gauge >= FIGHT_GAUGE_BAR);
+    CHECK(ev(FE_SUPER) == 0 && S.f[1].hp == hp_max(1) - dmg(FC_GRANNY, FM_JAB) - dmg(FC_GRANNY, FM_JAB2) &&
+          S.f[0].gauge >= FIGHT_GAUGE_BAR);
 
     // ▼ ● ▲:▲ 前面是 ●,不是小招(● 被挡,收招完 ▲ 是重击)
     start(FC_KID, FC_DAD, 0, 0);
@@ -415,7 +418,7 @@ static void test_prefix_binds_next_key(void) {
 
 static void test_ko(void) {
     start(FC_GRANNY, FC_KID, 0, 0);
-    S.f[1].hp = 30;
+    S.f[1].hp = 10;   // 比一记轻拳少
     key(0, FK_OK);
     run_to(200);
     CHECK(S.f[1].hp == 0 && S.f[1].st == FS_KO && S.winner == 0);
@@ -428,7 +431,7 @@ static void test_ko(void) {
 
     // 互相打中两个一起倒:平
     start(FC_GRANNY, FC_GRANNY, 0, 0);
-    S.f[0].hp = S.f[1].hp = 40;
+    S.f[0].hp = S.f[1].hp = 10;
     key(0, FK_OK);
     key(1, FK_OK);
     run_to(200);
@@ -437,10 +440,10 @@ static void test_ko(void) {
 }
 
 static void test_timeup(void) {
-    // 按血占满血的比例比:500/900 > 550/1000
+    // 按血占满血的比例比:500/950 > 520/1000
     start(FC_KID, FC_DAD, 0, 0);
     S.f[0].hp = 500;
-    S.f[1].hp = 550;
+    S.f[1].hp = 520;
     run_to(FIGHT_ROUND_MS - FIGHT_STEP);
     CHECK(S.winner == FIGHT_UNDECIDED);
     fight_sim_step(&S);
@@ -448,8 +451,8 @@ static void test_timeup(void) {
     fight_sim_step(&S);
     CHECK(S.clock == FIGHT_ROUND_MS && ev(FE_TIMEUP) == 1);
 
-    start(FC_KID, FC_DAD, 0, 0);
-    S.f[0].hp = 450;
+    start(FC_KID, FC_DAD, 0, 0);   // 475/950 = 500/1000
+    S.f[0].hp = 475;
     S.f[1].hp = 500;
     run_to(FIGHT_ROUND_MS);
     CHECK(S.winner == FIGHT_DRAW && ev(FE_TIMEUP) == 1 && LAST[FE_TIMEUP].who == FIGHT_DRAW);
@@ -465,7 +468,7 @@ static void test_gauge_caps(void) {
     start(FC_GRANNY, FC_KID, 5000, 0);
     CHECK(S.f[0].gauge == FIGHT_GAUGE_MAX);
 
-    start(FC_GRANNY, FC_KID, 2990, 2950);
+    start(FC_GRANNY, FC_KID, FIGHT_GAUGE_MAX - FIGHT_GAUGE_HIT + 5, FIGHT_GAUGE_MAX - FIGHT_GAUGE_HURT + 5);   // 涨了就超
     key(0, FK_OK);
     run_to(200);
     CHECK(S.f[0].gauge == FIGHT_GAUGE_MAX && S.f[1].gauge == FIGHT_GAUGE_MAX);
@@ -477,7 +480,7 @@ static void test_gauge_caps(void) {
     run_to(200);
     CHECK(S.f[1].gauge == FIGHT_GAUGE_HURT + FIGHT_GAUGE_BEHIND);
     start(FC_GRANNY, FC_DAD, 0, 0);
-    S.f[1].hp = 850;   // 挨完 810,只少 190
+    S.f[1].hp = (int16_t)(810 + dmg(FC_GRANNY, FM_JAB));   // 挨完 810,只少 190
     key(0, FK_OK);
     run_to(200);
     CHECK(S.f[1].gauge == FIGHT_GAUGE_HURT);
@@ -486,7 +489,7 @@ static void test_gauge_caps(void) {
 // 事件队列满了:丢最旧的打中,KO 不丢
 static void test_events_full(void) {
     start(FC_GRANNY, FC_KID, 0, 0);
-    S.f[1].hp = 400;
+    S.f[1].hp = (int16_t)(10 * dmg(FC_GRANNY, FM_JAB) - 5);   // 第 10 拳打倒
     for (int i = 0; i < 10; i++) {
         key(0, FK_OK);
         run_to(S.clock + 1500);
@@ -500,6 +503,57 @@ static void test_events_full(void) {
     }
     CHECK(e.kind == FE_KO && e.who == 1);
     CHECK(starts == 10 && hits == FIGHT_EVQ - 1 - 10);
+}
+
+// 防无限连:● 打中一次以后一秒 5 下轮着按 ▼ ●(没气,▼ ● 是举盾 + 新的一拳)。新的一拳不在连招里,
+// 打到还僵着的人是打空;挨打的人(每 200 ms 按一下 ▼ / ●,四种相位)第一下挨打后 1 秒内能动。
+static void test_no_infinite_lock(void) {
+    for (uint8_t c0 = 0; c0 < FC_COUNT; c0++) {
+        for (uint32_t ph = 0; ph < 200; ph += 50) {
+            start(c0, FC_DAD, 0, 0);
+            key(0, FK_OK);
+            uint32_t hit_at = 0, n = 0;
+            bool acted = false;
+            for (uint32_t t = 0; t < 5000 && !acted; t += FIGHT_STEP) {
+                if (t >= 200 && t % 200 == 0) key(0, (t / 200) % 2 ? FK_DOWN : FK_OK);
+                if (t % 200 == ph) key(1, (n++ % 2) ? FK_DOWN : FK_OK);
+                fight_sim_step(&S);
+                uint8_t st = S.f[1].st;
+                if (!hit_at && st == FS_HITSTUN) hit_at = S.clock;
+                if (hit_at && (st == FS_IDLE || st == FS_GUARD || st == FS_MOVE)) {
+                    CHECK(S.clock - hit_at <= 1000);
+                    acted = true;
+                }
+            }
+            CHECK(hit_at && acted);
+        }
+    }
+}
+
+// 规则改了以后真的连招照样连上:● ● ● 三连、● ● ▲、● ▼ ●(有气)大招
+static void test_chains_still_connect(void) {
+    for (uint8_t c0 = 0; c0 < FC_COUNT; c0++) {
+        start(c0, FC_KID, 0, 0);
+        key(0, FK_OK);
+        run_to(200);
+        key(0, FK_OK);
+        run_to(400);
+        key(0, FK_OK);
+        run_to(3000);
+        const fight_char_def_t *d = fight_char(c0);
+        CHECK(ev_by(FE_HIT, 0) == 3 && ev(FE_WHIFF) == 0);
+        CHECK(S.f[1].hp == hp_max(1) - (d->mv[FM_JAB].dmg + d->mv[FM_JAB2].dmg + d->mv[FM_JAB3].dmg));
+
+        start(c0, FC_KID, FIGHT_GAUGE_BAR, 0);
+        key(0, FK_OK);
+        run_to(200);
+        key(0, FK_DOWN);
+        run_to(400);
+        key(0, FK_OK);
+        CHECK(S.freeze && S.f[0].st == FS_SUPER_OUT);
+        run_to(3000);
+        CHECK(ev_by(FE_SUPER, 0) == 1 && S.f[1].hp == hp_max(1) - (d->mv[FM_JAB].dmg + d->mv[FM_SUPER].dmg));
+    }
 }
 
 int main(void) {
@@ -524,6 +578,8 @@ int main(void) {
     test_timeup();
     test_gauge_caps();
     test_events_full();
+    test_no_infinite_lock();
+    test_chains_still_connect();
     printf("test_sim: PASS\n");
     return 0;
 }

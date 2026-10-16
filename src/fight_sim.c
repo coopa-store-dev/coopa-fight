@@ -334,6 +334,10 @@ static void resolve_contact(fight_sim_t *s, uint8_t who, uint8_t m, bool second)
         if (!second) end_chain(a);
         return;
     }
+    if (d->st == FS_HITSTUN && !a->chain && !second) {  // 挨打僵着的人只吃这一套连招的下一下;另起的招打不中(防无限连)
+        event(s, FE_WHIFF, who, m);
+        return;
+    }
     if (d->st == FS_STANCE) {
         counter(s, !who);
         return;

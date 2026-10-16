@@ -5,7 +5,7 @@
 // 一步的顺序(两人固定,先算判定再统一结算):
 //   1. clock、两人的 t 往前走,冷却、刚醒吃键、晕往下减;
 //   2. 两人这一步谁打到判定(出招的 t 正好到 startup;锅盖飞回来);两边出招都打到 = 互相打中;
-//   3. 结算打到:打空(刚醒)/ 太极接住 / 挡住 / 砸开防御 / 打中 / 重击后半段只扣轻拳的血;扣血、涨气、进僵直或晕;
+//   3. 结算打到:打空(刚醒;对方挨打僵着、这一下又不是连招里的)/ 太极接住 / 挡住 / 砸开防御 / 打中 / 重击后半段只扣轻拳的血;扣血、涨气、进僵直或晕;
 //      锅盖第二下在这之后算;
 //   4. 有人血空 → KO,这一回合结束;
 //   5. 到时间的状态回 FS_IDLE(晕到 0 醒、太极收招、保护消失);排着的键按顺序出(连招里按连招解释);
@@ -26,11 +26,11 @@
 #define FIGHT_PREFIX_MS 350   // ▼ 前缀:按 ▼ 后这么久内的 ▲ / ● 算小招 / 大招
 #define FIGHT_ROUND_MS 60000
 #define FIGHT_LATE_MAX 400    // 联机晚到的键最多按本来的时刻补算这么久
-#define FIGHT_GAUGE_HIT 80    // 打中
-#define FIGHT_GAUGE_HURT 120  // 挨打
+#define FIGHT_GAUGE_HIT 10    // 打中
+#define FIGHT_GAUGE_HURT 30   // 挨打
 #define FIGHT_GAUGE_BEHIND 60 // 挨打时血比对方少 FIGHT_BEHIND 以上再加
 #define FIGHT_BEHIND 200      // 满血 1000 制
-#define FIGHT_GAUGE_BLOCK 40  // 挡住、被挡都加
+#define FIGHT_GAUGE_BLOCK 5   // 挡住、被挡都加
 #define FIGHT_EVQ 16
 #define FIGHT_UNDECIDED 2     // winner:还没分出
 #define FIGHT_DRAW 3          // winner:平
@@ -83,7 +83,7 @@ typedef struct {
 //   FE_START       出招的人
 //   FE_HIT         打中的人(出招方);包括重击后半段只扣血没打断、大招冻结完扣血(move = FM_SUPER)
 //   FE_BLOCK       被挡住的人(出招方)
-//   FE_WHIFF       打空的人(出招方):打到刚醒 FIGHT_WAKE_EAT 里的人;爷爷太极没人打过来
+//   FE_WHIFF       打空的人(出招方):打到刚醒 FIGHT_WAKE_EAT 里的人、不在连招里的一下打到挨打僵着的人;爷爷太极没人打过来
 //   FE_GUARD_BREAK 砸开防御的人(出招方)
 //   FE_TRADE       两边同一步打中对方:who 固定 0,move 是 0 号的招(1 号的招还在 f[1].move)
 //   FE_SUPER       放大招的人(特写开始)

@@ -28,6 +28,12 @@ static void start(uint8_t c0, uint8_t c1, uint16_t g0, uint16_t g1) {
 static void run_to(uint32_t clock) { while (S.clock < clock && S.winner == FIGHT_UNDECIDED) fight_sim_step(&S); }
 static void key(int who, uint8_t k) { fight_sim_key(&S, (uint8_t)who, k); }
 static int hp_max(int who) { return fight_char(S.f[who].ch)->hp; }
+static int dmg(uint8_t c, uint8_t m) { return fight_char(c)->mv[m].dmg; }   // 伤害读出招表(数值会调)
+// 奶奶(super_dizzy 的放招方)的几招
+#define GJ dmg(FC_GRANNY, FM_JAB)
+#define GJ2 dmg(FC_GRANNY, FM_JAB2)
+#define GJ3 dmg(FC_GRANNY, FM_JAB3)
+#define GS dmg(FC_GRANNY, FM_SUPER)
 
 // c0 提前按 ● ▼ ● 打 c1 放大招,跑完特写:返回 c1 开始晕的 clock
 static uint32_t super_dizzy_as(uint8_t c0, uint8_t c1, uint16_t g0) {
@@ -83,17 +89,17 @@ static void test_jab_down_ok_super(void) {
     CHECK(ev_by(FE_SUPER, 0) == 1 && LAST[FE_SUPER].move == FM_SUPER);
     CHECK(S.freeze == FIGHT_SUPER_FREEZE && S.f[0].st == FS_SUPER_OUT && S.f[1].st == FS_SUPER_IN);
     CHECK(S.f[0].gauge == 1000 + FIGHT_GAUGE_HIT - FIGHT_GAUGE_BAR && S.f[1].gauge == FIGHT_GAUGE_HURT);
-    CHECK(S.f[1].hp == hp_max(1) - 40);
+    CHECK(S.f[1].hp == hp_max(1) - GJ);
     // 特写里两边按的键都丢掉(不排队、不记 ▼)
     key(1, FK_DOWN);
     key(1, FK_OK);
     key(0, FK_OK);
     CHECK(S.f[0].qn == 0 && S.f[1].qn == 0 && S.f[1].down_at == UINT32_MAX && S.f[1].st == FS_SUPER_IN);
     for (int i = 0; i < FIGHT_SUPER_FREEZE / FIGHT_STEP - 1; i++) fight_sim_step(&S);
-    CHECK(S.clock == 200 && S.freeze == FIGHT_STEP && S.f[1].hp == hp_max(1) - 40);
+    CHECK(S.clock == 200 && S.freeze == FIGHT_STEP && S.f[1].hp == hp_max(1) - GJ);
     fight_sim_step(&S);
     CHECK(S.clock == 200 && S.freeze == 0);
-    CHECK(S.f[1].hp == hp_max(1) - 40 - 330);
+    CHECK(S.f[1].hp == hp_max(1) - GJ - GS);
     CHECK(ev_by(FE_HIT, 0) == 2 && LAST[FE_HIT].move == FM_SUPER);
     CHECK(S.f[1].st == FS_DIZZY && S.f[1].dur == FIGHT_DIZZY_SUPER && S.f[1].mash_left == FIGHT_DIZZY_SUPER);
     CHECK(S.f[1].protect && ev_by(FE_DIZZY, 1) == 1);
@@ -121,7 +127,7 @@ static void test_super_needs_gauge(void) {
     CHECK(S.f[0].guard_cool == FIGHT_GUARD_COOL && S.f[0].chain == 0);   // 盾举起来又被这一拳放下了
     CHECK(ev(FE_SUPER) == 0 && S.f[0].gauge == 900 + FIGHT_GAUGE_HIT);
     run_to(600);
-    CHECK(S.f[1].hp == hp_max(1) - 80 && S.f[0].chain == 1);   // 对方还僵着,这一拳也中
+    CHECK(S.f[1].hp == hp_max(1) - GJ && S.f[0].chain == 0 && ev_by(FE_WHIFF, 0) == 1);   // 新的一拳不在连招里,对方还僵着:打空
 }
 
 // 第一拳被挡:提前按的 ▼ ● 收招完是举盾 + 一拳,不出大招、不扣气
@@ -168,7 +174,7 @@ static void test_super_late_down(void) {
     key(0, FK_OK);
     CHECK(S.f[0].st == FS_MOVE && S.f[0].move == FM_JAB);
     run_to(1500);
-    CHECK(ev(FE_SUPER) == 0 && S.f[1].hp == hp_max(1) - 80 && S.f[0].chain == 1);
+    CHECK(ev(FE_SUPER) == 0 && S.f[1].hp == hp_max(1) - GJ - GJ2 && S.f[0].chain == 1);
 }
 
 // 大人知道要晕、马上按,一秒 5 下:约 1.1 秒醒
@@ -212,7 +218,7 @@ static void test_hit_wakes(void) {
     CHECK(S.f[1].st == FS_DIZZY);
     run_to(d + 200);
     CHECK(ev_by(FE_WAKE, 1) == 1 && S.f[1].st == FS_HITSTUN && S.f[1].dur == 600);
-    CHECK(S.f[1].hp == hp_max(1) - 40 - 330 - 40);
+    CHECK(S.f[1].hp == hp_max(1) - GJ - GS - GJ);
     CHECK(S.f[0].chain == 1 && S.f[0].chain_open);
     CHECK(S.f[1].mash_left == 0 && S.f[1].eat_keys == 0 && S.f[1].protect);
     run_to(d + 790);
@@ -235,7 +241,7 @@ static void test_no_super_on_dizzy_combo(void) {
     key(0, FK_OK);
     run_to(d + 3000);
     CHECK(ev(FE_SUPER) == 1 && ev(FE_DIZZY) == 1 && ev_by(FE_WAKE, 1) == 1);
-    CHECK(S.f[1].hp == hp_max(1) - 40 - 330 - 40 - 40 - 70);
+    CHECK(S.f[1].hp == hp_max(1) - GJ - GS - GJ - GJ2 - GJ3);
     CHECK(S.f[0].gauge == g + 2 * FIGHT_GAUGE_HIT);   // 打醒那一下不涨(对方晕着),后两下照常
 }
 
@@ -256,7 +262,7 @@ static void test_no_super_after_break(void) {
     CHECK(S.f[1].protect && S.f[0].qn == 3);
     run_to(3000);
     CHECK(ev(FE_SUPER) == 0 && ev(FE_DIZZY) == 1 && ev_by(FE_WAKE, 1) == 1);
-    CHECK(S.f[1].hp == hp_max(1) - 120 - 40 - 40 && S.f[0].gauge >= 2000);
+    CHECK(S.f[1].hp == hp_max(1) - dmg(FC_KID, FM_HEAVY) - dmg(FC_KID, FM_JAB) - dmg(FC_KID, FM_JAB2) && S.f[0].gauge >= 2000);
 }
 
 // 审核的时间线:醒的那一刻起 ● ● ▼ ● 掐好时间,大招仍不出;醒后 0.3 秒内打不中
@@ -276,7 +282,7 @@ static void test_wake_timing_loop(void) {
     CHECK(ev_by(FE_WHIFF, 0) == 1 && S.f[1].hp == hp && S.f[0].chain == 0);
     run_to(w + 3000);
     CHECK(ev(FE_SUPER) == 1 && ev(FE_DIZZY) == 1);
-    CHECK(S.f[1].hp == hp - 40 - 40);
+    CHECK(S.f[1].hp == hp - GJ - GJ2);
 
     // 第一拳掐在醒后 290 ms 打到:还在 0.3 秒里,打空
     super_dizzy(2000);
@@ -301,7 +307,7 @@ static void test_wake_timing_loop(void) {
     CHECK(S.f[1].st == FS_HITSTUN && S.f[1].protect && ev(FE_WHIFF) == 0);
     run_to(w + 3000);
     CHECK(ev(FE_SUPER) == 1 && ev(FE_DIZZY) == 1);
-    CHECK(S.f[1].hp == hp - 40 - 40 - 70 && !S.f[1].protect);
+    CHECK(S.f[1].hp == hp - GJ - GJ2 - GJ3 && !S.f[1].protect);
     CHECK(S.f[0].gauge >= FIGHT_GAUGE_BAR);   // 有气也没出
 
     // 起手在 0.3 秒里出的(醒后 110 ms),打到时(310)保护已经没了:这套连招仍然不能有大招
@@ -316,7 +322,7 @@ static void test_wake_timing_loop(void) {
     run_to(w + 400);
     key(0, FK_OK);
     run_to(w + 3000);
-    CHECK(ev(FE_SUPER) == 1 && ev(FE_DIZZY) == 1 && S.f[1].hp == hp - 40 - 40);
+    CHECK(ev(FE_SUPER) == 1 && ev(FE_DIZZY) == 1 && S.f[1].hp == hp - GJ - GJ2);
 
     // 库巴弹弓起手(醒后 110 ms 出、510 打到,开连招):同样不能有大招
     super_dizzy_as(FC_KID, FC_DAD, 2000);
@@ -334,7 +340,7 @@ static void test_wake_timing_loop(void) {
     run_to(w + 650);
     key(0, FK_OK);
     run_to(w + 3000);
-    CHECK(ev(FE_SUPER) == 1 && ev(FE_DIZZY) == 1 && S.f[1].hp == dad_hp - 60 - 40);
+    CHECK(ev(FE_SUPER) == 1 && ev(FE_DIZZY) == 1 && S.f[1].hp == dad_hp - dmg(FC_KID, FM_SPECIAL) - dmg(FC_KID, FM_JAB2));
 
     // 起手在保护消失以后才出(醒后 300 ms):正常的连招,● ▼ ● 能出大招
     super_dizzy(2000);
@@ -363,7 +369,7 @@ static void test_late_keys_after_wake_hit(void) {
     CHECK(ev(FE_SUPER) == 1 && S.f[0].move == FM_JAB2 && S.f[1].st == FS_HITSTUN);   // 只出拳(照样拉回僵直)
     run_to(d + 3000);
     CHECK(ev(FE_SUPER) == 1 && ev(FE_DIZZY) == 1);
-    CHECK(S.f[1].hp == hp_max(1) - 40 - 330 - 40 - 40);
+    CHECK(S.f[1].hp == hp_max(1) - GJ - GS - GJ - GJ2);
 }
 
 // 自己醒、过了 0.3 秒回到能动:保护消失,下一次 ● ▼ ● 能出
@@ -428,12 +434,12 @@ static void test_special_from_guard(void) {
     CHECK(S.f[0].st == FS_MOVE && S.f[0].move == FM_SPECIAL);
     CHECK(S.f[0].guard_cool == FIGHT_GUARD_COOL && S.f[0].special_cool == FIGHT_SPECIAL_COOL);
     run_to(500);
-    CHECK(S.f[1].hp == hp_max(1) - 60 && S.f[1].st == FS_HITSTUN && S.f[0].chain == 1 && S.f[0].chain_open);
+    CHECK(S.f[1].hp == hp_max(1) - dmg(FC_KID, FM_SPECIAL) && S.f[1].st == FS_HITSTUN && S.f[0].chain == 1 && S.f[0].chain_open);
     run_to(600);
     key(0, FK_OK);
     CHECK(S.f[0].move == FM_JAB2);
     run_to(750);
-    CHECK(S.f[1].hp == hp_max(1) - 60 - 40 && S.f[0].chain == 2);
+    CHECK(S.f[1].hp == hp_max(1) - dmg(FC_KID, FM_SPECIAL) - dmg(FC_KID, FM_JAB2) && S.f[0].chain == 2);
 
     // 爸爸肩撞:砸开防御,对方只僵不晕
     start(FC_DAD, FC_KID, 0, 0);
@@ -442,7 +448,7 @@ static void test_special_from_guard(void) {
     run_to(50);
     key(0, FK_UP);
     run_to(400);
-    CHECK(ev_by(FE_GUARD_BREAK, 0) == 1 && S.f[1].hp == hp_max(1) - 80);
+    CHECK(ev_by(FE_GUARD_BREAK, 0) == 1 && S.f[1].hp == hp_max(1) - dmg(FC_DAD, FM_SPECIAL));
     CHECK(S.f[1].st == FS_HITSTUN && S.f[1].dur == 600 && !S.f[1].protect && ev(FE_DIZZY) == 0);
 
     // 奶奶锅盖:第一下被挡,第二下(900 ms)对方盾放下了 → 中
@@ -457,7 +463,7 @@ static void test_special_from_guard(void) {
     run_to(990);
     CHECK(S.f[1].hp == hp_max(1) && S.f[1].st == FS_IDLE);
     run_to(1000);
-    CHECK(ev_by(FE_HIT, 0) == 1 && S.f[1].hp == hp_max(1) - 40 && S.f[1].st == FS_HITSTUN);
+    CHECK(ev_by(FE_HIT, 0) == 1 && S.f[1].hp == hp_max(1) - dmg(FC_GRANNY, FM_SPECIAL) && S.f[1].st == FS_HITSTUN);
     // 长按撑盾:两下都挡住
     start(FC_GRANNY, FC_KID, 0, 0);
     key(0, FK_DOWN);
@@ -474,7 +480,7 @@ static void test_special_from_guard(void) {
     run_to(100);
     key(0, FK_UP);
     run_to(1500);
-    CHECK(ev_by(FE_HIT, 0) == 2 && S.f[1].hp == hp_max(1) - 80);
+    CHECK(ev_by(FE_HIT, 0) == 2 && S.f[1].hp == hp_max(1) - 2 * dmg(FC_GRANNY, FM_SPECIAL));
 
     // 爷爷太极:对方轻拳打过来 → 接住反打,对方只僵不晕;爷爷的连招窗口打开
     start(FC_GRANDPA, FC_GRANNY, 1000, 0);
@@ -486,13 +492,13 @@ static void test_special_from_guard(void) {
     key(1, FK_OK);
     run_to(300);
     CHECK(ev_by(FE_COUNTER, 0) == 1 && ev(FE_HIT) == 0);
-    CHECK(S.f[0].hp == hp_max(0) && S.f[1].hp == hp_max(1) - 60);
+    CHECK(S.f[0].hp == hp_max(0) && S.f[1].hp == hp_max(1) - dmg(FC_GRANDPA, FM_SPECIAL));
     CHECK(S.f[1].st == FS_HITSTUN && S.f[1].dur == 600 && ev(FE_DIZZY) == 0);
     CHECK(S.f[0].st == FS_IDLE && S.f[0].chain == 1 && S.f[0].chain_open);
     key(0, FK_OK);
     CHECK(S.f[0].move == FM_JAB2);
     run_to(550);
-    CHECK(S.f[1].hp == hp_max(1) - 60 - 46);
+    CHECK(S.f[1].hp == hp_max(1) - dmg(FC_GRANDPA, FM_SPECIAL) - dmg(FC_GRANDPA, FM_JAB2));
     // 接住以后 ▼ ● 是大招
     start(FC_GRANDPA, FC_GRANNY, 1000, 0);
     key(0, FK_DOWN);
@@ -515,7 +521,7 @@ static void test_special_from_guard(void) {
         key(1, FK_UP);   // 爸爸重击 500 / 肩撞 350 打到
         CHECK(S.f[1].move == (k ? FM_SPECIAL : FM_HEAVY));
         run_to(600);
-        CHECK(ev_by(FE_COUNTER, 0) == 1 && S.f[0].hp == hp_max(0) && S.f[1].hp == hp_max(1) - 60);
+        CHECK(ev_by(FE_COUNTER, 0) == 1 && S.f[0].hp == hp_max(0) && S.f[1].hp == hp_max(1) - dmg(FC_GRANDPA, FM_SPECIAL));
         CHECK(S.f[1].st == FS_HITSTUN);
     }
 }
@@ -597,7 +603,7 @@ static void test_stance_whiff(void) {
     key(1, FK_OK);
     run_to(1300);
     CHECK(ev_by(FE_HIT, 1) == 1 && ev(FE_COUNTER) == 0);
-    CHECK(S.f[0].st == FS_HITSTUN && S.f[0].hp == hp_max(0) - 40);
+    CHECK(S.f[0].st == FS_HITSTUN && S.f[0].hp == hp_max(0) - GJ);
 }
 
 // 晕着、特写时两边都不涨气;大招那一下也不涨
@@ -628,7 +634,7 @@ static void test_late_combo_pulls_back(void) {
     fight_sim_key_at(&S, 0, FK_OK, 290);     // 本来 700
     CHECK(ev_by(FE_SUPER, 0) == 1 && S.f[1].st == FS_SUPER_IN && S.f[1].guard_cool == 0);
     while (S.freeze) fight_sim_step(&S);
-    CHECK(S.f[1].hp == hp_max(1) - 40 - 330 && S.f[1].st == FS_DIZZY);
+    CHECK(S.f[1].hp == hp_max(1) - GJ - GS && S.f[1].st == FS_DIZZY);
 
     // 对方缓过来后出了一拳(还没打到):晚到的 ● 连上,他那一拳作废
     start(FC_GRANNY, FC_KID, 0, 0);
@@ -639,7 +645,7 @@ static void test_late_combo_pulls_back(void) {
     fight_sim_key_at(&S, 0, FK_OK, 290);
     CHECK(S.f[0].move == FM_JAB2 && S.f[1].st == FS_HITSTUN);
     run_to(1190);
-    CHECK(S.f[1].hp == hp_max(1) - 80 && S.f[0].chain == 2);
+    CHECK(S.f[1].hp == hp_max(1) - GJ - GJ2 && S.f[0].chain == 2);
     run_to(3000);
     CHECK(S.f[0].hp == hp_max(0));
 }
@@ -656,7 +662,7 @@ static void test_late_down_waits(void) {
     fight_sim_key_at(&S, 0, FK_OK, 400);      // 本来 600
     CHECK(ev_by(FE_SUPER, 0) == 1 && S.f[1].st == FS_SUPER_IN);
     while (S.freeze) fight_sim_step(&S);
-    CHECK(S.f[1].hp == hp_max(1) - 40 - 330 && S.f[1].st == FS_DIZZY);
+    CHECK(S.f[1].hp == hp_max(1) - GJ - GS && S.f[1].st == FS_DIZZY);
 
     // 晚到的 ▼ 后面没有键:到了真时钟的期限(本来的 300 + 350 + FIGHT_LATE_MAX)就举盾
     start(FC_GRANNY, FC_KID, 1000, 0);
@@ -703,7 +709,7 @@ static void test_late_opener_protect(void) {
     run_to(w + 650);
     key(0, FK_OK);
     run_to(w + 3000);
-    CHECK(ev(FE_SUPER) == 1 && ev(FE_DIZZY) == 1 && S.f[1].hp == hp - 40 - 40);
+    CHECK(ev(FE_SUPER) == 1 && ev(FE_DIZZY) == 1 && S.f[1].hp == hp - GJ - GJ2);
 
     // 对照:本来的时刻在保护消失以后(w + 310):正常起手,能出大招
     super_dizzy(2000);

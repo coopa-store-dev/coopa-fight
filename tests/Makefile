@@ -4,7 +4,7 @@ CFLAGS := -std=c11 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -fn
           -I../src -I.
 OUT := .build
 HDRS := $(wildcard ../src/*.h) $(wildcard *.h)
-TESTS := test_moves test_sim test_super test_game test_link
+TESTS := test_moves test_sim test_super test_game test_link test_bot test_local test_balance
 
 all: $(addprefix $(OUT)/,$(TESTS))
 	@for t in $(TESTS); do $(OUT)/$$t || exit 1; done
@@ -29,5 +29,16 @@ $(OUT)/test_game: test_game.c $(GAME) $(HDRS) | $(OUT)
 
 $(OUT)/test_link: test_link.c $(GAME) $(HDRS) | $(OUT)
 	$(CC) $(CFLAGS) $(filter %.c,$^) -o $@
+
+$(OUT)/test_bot: test_bot.c ../src/fight_bot.c ../src/fight_sim.c ../src/fight_moves.c $(HDRS) | $(OUT)
+	$(CC) $(CFLAGS) $(filter %.c,$^) -o $@
+
+$(OUT)/test_local: test_local.c ../src/fight_local.c ../src/fight_bot.c ../src/fight_game.c ../src/fight_msg.c \
+		../src/fight_sim.c ../src/fight_moves.c $(HDRS) | $(OUT)
+	$(CC) $(CFLAGS) $(filter %.c,$^) -o $@
+
+# 数值统计跑上万场:开优化、不开 sanitizer(规则在别的测试里已经在 ASan 下跑过)。场数:make -C tests BALANCE_N=1000
+$(OUT)/test_balance: test_balance.c ../src/fight_bot.c ../src/fight_sim.c ../src/fight_moves.c $(HDRS) | $(OUT)
+	$(CC) -std=c11 -O2 -Wall -Wextra -Werror -I../src -I. $(filter %.c,$^) -o $@
 
 .PHONY: all
