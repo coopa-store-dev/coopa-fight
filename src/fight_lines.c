@@ -9235,25 +9235,25 @@ static const uint8_t fight_win_grandpa[] = {
     0x88, 0x20, 0x33, 0x24, 0x30, 0x88, 0xd2, 0xac, 0xa9, 0x9c, 0x49, 0x24, 0x30,
 };
 
-const kit_line_t FL_PICK[4] = {
+const kit_line_t fight_lines_pick[4] = {
     { fight_pick_kid, 12942, "PICK_KID" },
     { fight_pick_dad, 14185, "PICK_DAD" },
     { fight_pick_granny, 19387, "PICK_GRANNY" },
     { fight_pick_grandpa, 19226, "PICK_GRANDPA" },
 };
-const kit_line_t FL_SPECIAL[4] = {
+const kit_line_t fight_lines_special[4] = {
     { fight_special_kid, 18456, "SPECIAL_KID" },
     { fight_special_dad, 13552, "SPECIAL_DAD" },
     { fight_special_granny, 15660, "SPECIAL_GRANNY" },
     { fight_special_grandpa, 19005, "SPECIAL_GRANDPA" },
 };
-const kit_line_t FL_SUPER[4] = {
+const kit_line_t fight_lines_super[4] = {
     { fight_super_kid, 16880, "SUPER_KID" },
     { fight_super_dad, 14988, "SUPER_DAD" },
     { fight_super_granny, 14866, "SUPER_GRANNY" },
     { fight_super_grandpa, 32353, "SUPER_GRANDPA" },
 };
-const kit_line_t FL_WIN[4] = {
+const kit_line_t fight_lines_win[4] = {
     { fight_win_kid, 23798, "WIN_KID" },
     { fight_win_dad, 24097, "WIN_DAD" },
     { fight_win_granny, 12257, "WIN_GRANNY" },

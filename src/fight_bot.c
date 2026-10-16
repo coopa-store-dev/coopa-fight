@@ -51,18 +51,18 @@ typedef struct {
     uint8_t habit[HABIT_N], habit_n, habit_i;
 } brain_t;
 
-_Static_assert(sizeof(brain_t) <= sizeof(((fight_bot_t *)0)->pad), "brain_t 要放得进 fight_bot_t.pad");
+_Static_assert(sizeof(brain_t) <= sizeof(((fight_bot_t *)0)->pad), "brain_t must fit in fight_bot_t.pad");
 
 static brain_t *brain(fight_bot_t *b) { return (brain_t *)(void *)b->pad; }
 
 // 真人模型(设计 §10、计划 Task 5):大人一秒 5 下、反应 0.65 秒;小孩一秒 3.5 下、反应 0.9 秒、按错多、偶尔停顿
-const fight_bot_cfg_t FIGHT_HUMAN_ADULT = { 650, 150, 200, 40, 25, 25, 10, 85, 90, 3, true, true, 0, 20 };
-const fight_bot_cfg_t FIGHT_HUMAN_KID = { 900, 250, 286, 60, 15, 20, 5, 60, 60, 12, false, true, 15, 50 };
+const fight_bot_cfg_t fight_human_adult = { 650, 150, 200, 40, 25, 25, 10, 85, 90, 3, true, true, 0, 20 };
+const fight_bot_cfg_t fight_human_kid = { 900, 250, 286, 60, 15, 20, 5, 60, 60, 12, false, true, 15, 50 };
 // 电脑三档:简单 ≈ 小孩再慢一点(反应 1.1 秒、一秒 3 下、少接连招和大招);普通介于两者(不读习惯);
 // 厉害 ≈ 大人但反应 0.5 秒。厉害打简单要赢 75%–95%(test_balance)
-const fight_bot_cfg_t FIGHT_BOT_EASY = { 1100, 300, 333, 60, 15, 20, 5, 50, 50, 15, false, true, 20, 50 };
-const fight_bot_cfg_t FIGHT_BOT_NORMAL = { 775, 200, 243, 50, 20, 22, 8, 72, 75, 7, false, true, 7, 35 };
-const fight_bot_cfg_t FIGHT_BOT_HARD = { 500, 150, 200, 40, 25, 25, 10, 85, 90, 3, true, true, 0, 20 };
+const fight_bot_cfg_t fight_bot_easy = { 1100, 300, 333, 60, 15, 20, 5, 50, 50, 15, false, true, 20, 50 };
+const fight_bot_cfg_t fight_bot_normal = { 775, 200, 243, 50, 20, 22, 8, 72, 75, 7, false, true, 7, 35 };
+const fight_bot_cfg_t fight_bot_hard = { 500, 150, 200, 40, 25, 25, 10, 85, 90, 3, true, true, 0, 20 };
 
 void fight_seen(const fight_sim_t *s, uint8_t me, fight_seen_t *out) {
     me &= 1;

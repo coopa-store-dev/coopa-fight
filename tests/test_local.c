@@ -60,7 +60,7 @@ static void test_cpu_frozen_by_super(void) {
     CHECK(L.me.sim.freeze && L.me.sim.f[1].st == FS_SUPER_IN);
     CHECK(L.cpu.sim.freeze && L.cpu.sim.f[1].st == FS_SUPER_IN && L.cpu.sim.f[0].st == FS_SUPER_OUT);
     fight_bot_t bot;
-    fight_bot_init(&bot, &FIGHT_BOT_HARD, rnd);
+    fight_bot_init(&bot, &fight_bot_hard, rnd);
     uint32_t clock = L.cpu.sim.clock, host_clock = L.me.sim.clock;
     int16_t hp = L.me.sim.f[0].hp;
     int presses = 0;
@@ -105,11 +105,11 @@ static void test_me_frozen_by_cpu_super(void) {
 
 // 我是「大人」模型、电脑是三档之一:打完一场,两边比分一致,有一边赢够 FIGHT_WIN
 static void test_bots_finish(void) {
-    const fight_bot_cfg_t *lv[3] = { &FIGHT_BOT_EASY, &FIGHT_BOT_NORMAL, &FIGHT_BOT_HARD };
+    const fight_bot_cfg_t *lv[3] = { &fight_bot_easy, &fight_bot_normal, &fight_bot_hard };
     for (int i = 0; i < 3; i++) {
         begin((uint8_t)(i % FC_COUNT), (uint8_t)((i + 1) % FC_COUNT));
         fight_bot_t a, b;
-        fight_bot_init(&a, &FIGHT_HUMAN_ADULT, rnd);
+        fight_bot_init(&a, &fight_human_adult, rnd);
         fight_bot_init(&b, lv[i], rnd);
         uint32_t supers = 0;
         for (int t = 0; t < 600000 && !(L.me.phase == GP_OVER && L.cpu.phase == GP_OVER); t += FIGHT_STEP) {

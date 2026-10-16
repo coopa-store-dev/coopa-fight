@@ -17,7 +17,7 @@ static void check(const kit_line_t *l) {
 }
 
 int main(void) {
-    const kit_line_t *sets[4] = { FL_PICK, FL_SPECIAL, FL_SUPER, FL_WIN };
+    const kit_line_t *sets[4] = { fight_lines_pick, fight_lines_special, fight_lines_super, fight_lines_win };
     for (int k = 0; k < 4; k++)
         for (int f = 0; f < 4; f++) check(&sets[k][f]);
     puts("test_lines: ok");

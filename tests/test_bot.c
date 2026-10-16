@@ -14,7 +14,7 @@ static uint32_t rnd(void) {
     return s_x >> 8;
 }
 
-static const fight_bot_cfg_t *ALL[5] = { &FIGHT_BOT_EASY, &FIGHT_BOT_NORMAL, &FIGHT_BOT_HARD, &FIGHT_HUMAN_ADULT, &FIGHT_HUMAN_KID };
+static const fight_bot_cfg_t *ALL[5] = { &fight_bot_easy, &fight_bot_normal, &fight_bot_hard, &fight_human_adult, &fight_human_kid };
 
 static void test_cfg_sums(void) {
     for (int i = 0; i < 5; i++) {
@@ -23,14 +23,14 @@ static void test_cfg_sums(void) {
         CHECK(c->react_ms > c->react_jit && c->gap_ms >= 1000 / 5);  // 谁都不超过一秒 5 下
     }
     // 真人模型(设计 §10、计划 Task 5)
-    const fight_bot_cfg_t *a = &FIGHT_HUMAN_ADULT, *k = &FIGHT_HUMAN_KID;
+    const fight_bot_cfg_t *a = &fight_human_adult, *k = &fight_human_kid;
     CHECK(a->react_ms == 650 && a->react_jit == 150 && a->gap_ms == 200 && a->reads_habits && a->mash);
     CHECK(a->p_jab == 40 && a->p_heavy == 25 && a->p_guard == 25 && a->p_special == 10);
     CHECK(a->p_combo == 85 && a->p_super == 90 && a->p_wrong == 3 && a->p_pause == 0);
     CHECK(k->react_ms == 900 && k->react_jit == 250 && k->gap_ms == 286 && !k->reads_habits && k->mash);
     CHECK(k->p_jab == 60 && k->p_heavy == 15 && k->p_guard == 20 && k->p_special == 5);
     CHECK(k->p_combo == 60 && k->p_super == 60 && k->p_wrong == 12 && k->p_pause == 15);
-    CHECK(FIGHT_BOT_HARD.react_ms == 500);
+    CHECK(fight_bot_hard.react_ms == 500);
 }
 
 // 两个模型对打 60 秒(一回合打完就再开一回合):每个人一回合里两下按下之间都 ≥ gap_ms(长按不是新的按下)
@@ -149,20 +149,20 @@ static int pct(int n, const keys_t *o) { return 100 * n / o->total; }
 
 // 大人统计对方的习惯:对方老出拳 → 多防(▼);老防 → 多抡重击(▲);老抡 → 早出拳(●)。小孩不读。
 static void test_reads_habits(void) {
-    keys_t base = face(&FIGHT_HUMAN_ADULT, -1);
-    keys_t vs_jab = face(&FIGHT_HUMAN_ADULT, FK_OK);
-    keys_t vs_guard = face(&FIGHT_HUMAN_ADULT, FK_DOWN);
-    keys_t vs_heavy = face(&FIGHT_HUMAN_ADULT, FK_UP);
+    keys_t base = face(&fight_human_adult, -1);
+    keys_t vs_jab = face(&fight_human_adult, FK_OK);
+    keys_t vs_guard = face(&fight_human_adult, FK_DOWN);
+    keys_t vs_heavy = face(&fight_human_adult, FK_UP);
     CHECK(pct(vs_jab.down, &vs_jab) > pct(base.down, &base) + 8);
     CHECK(pct(vs_guard.up, &vs_guard) > pct(base.up, &base) + 8);
     CHECK(pct(vs_heavy.ok, &vs_heavy) > pct(base.ok, &base) + 5);
-    keys_t kid_base = face(&FIGHT_HUMAN_KID, -1), kid_jab = face(&FIGHT_HUMAN_KID, FK_OK);
+    keys_t kid_base = face(&fight_human_kid, -1), kid_jab = face(&fight_human_kid, FK_OK);
     CHECK(pct(kid_jab.down, &kid_jab) <= pct(kid_base.down, &kid_base) + 3);   // 小孩不会因为对方老出拳就多防
 }
 
 // 有气、● 起手接大招:● ▼ ● 三下的间隔都 ≥ gap_ms,按完赶得上连招窗口(打到 + 僵 600)
 static void test_super_input(void) {
-    const fight_bot_cfg_t *c = &FIGHT_HUMAN_ADULT;
+    const fight_bot_cfg_t *c = &fight_human_adult;
     int seen = 0;
     for (int trial = 0; trial < 300 && seen < 30; trial++) {
         fight_bot_t b;

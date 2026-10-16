@@ -214,8 +214,8 @@ int main(int argc, char **argv) {
             s_x = 1000u * ca + cb + 1;
             uint32_t won = 0;
             for (int i = 0; i < pair_n; i++) {
-                player_bot(&A, &FIGHT_HUMAN_ADULT);
-                player_bot(&B, &FIGHT_HUMAN_ADULT);
+                player_bot(&A, &fight_human_adult);
+                player_bot(&B, &fight_human_adult);
                 result_t r;
                 won += play(&A, ca, &B, cb, i, &r);
                 tally(&ta, &r);
@@ -242,8 +242,8 @@ int main(int argc, char **argv) {
             s_x = 2000u + 10u * ck + cd;
             uint32_t won = 0, sup = 0;
             for (int i = 0; i < pair_n; i++) {
-                player_bot(&A, &FIGHT_HUMAN_KID);
-                player_bot(&B, &FIGHT_HUMAN_ADULT);
+                player_bot(&A, &fight_human_kid);
+                player_bot(&B, &fight_human_adult);
                 result_t r;
                 won += play(&A, ck, &B, cd, i, &r);
                 tally(&tk, &r);
@@ -278,7 +278,7 @@ int main(int argc, char **argv) {
 
     // 4. 狂按
     s_x = 3000;
-    double ma = mash_ms(&FIGHT_HUMAN_ADULT, n), mk = mash_ms(&FIGHT_HUMAN_KID, n);
+    double ma = mash_ms(&fight_human_adult, n), mk = mash_ms(&fight_human_kid, n);
     ga = expect(ma >= 1.0 && ma <= 1.3, "大人狂按醒 1.0–1.3 秒");
     gk = expect(mk >= 1.2 && mk <= 1.5, "小孩狂按醒 1.2–1.5 秒");
     printf("== 大招后狂按到醒:大人 %.2f 秒%s、小孩 %.2f 秒%s(不按 %.1f 秒)==\n", ma, mark(ga), mk, mark(gk),
@@ -296,7 +296,7 @@ int main(int argc, char **argv) {
             uint32_t won = 0;
             for (int i = 0; i < n; i++) {
                 player_dead(&A, ds);
-                player_bot(&B, &FIGHT_HUMAN_ADULT);
+                player_bot(&B, &fight_human_adult);
                 won += play(&A, c, &B, (uint8_t)(i / 2 % FC_COUNT), i, NULL);
             }
             double w = pc(won, (uint32_t)n);
@@ -309,7 +309,7 @@ int main(int argc, char **argv) {
         uint32_t won = 0;
         for (int i = 0; i < n; i++) {
             player_dead(&A, DS_SPECIAL);
-            player_bot(&B, &FIGHT_HUMAN_KID);
+            player_bot(&B, &fight_human_kid);
             won += play(&A, c, &B, (uint8_t)(i / 2 % FC_COUNT), i, NULL);
         }
         double w = pc(won, (uint32_t)n);
@@ -320,8 +320,8 @@ int main(int argc, char **argv) {
     s_x = 6000;
     uint32_t hard = 0, m = 300;
     for (uint32_t i = 0; i < m; i++) {
-        player_bot(&A, &FIGHT_BOT_HARD);
-        player_bot(&B, &FIGHT_BOT_EASY);
+        player_bot(&A, &fight_bot_hard);
+        player_bot(&B, &fight_bot_easy);
         hard += play(&A, (uint8_t)(i % FC_COUNT), &B, (uint8_t)(i / FC_COUNT % FC_COUNT), (int)(i / 16), NULL);
     }
     double hw = pc(hard, m);

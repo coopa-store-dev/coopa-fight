@@ -34,7 +34,7 @@ typedef struct {
     uint8_t p_pause;                // 两下之间多停 100–200 ms 的概率(小孩)
     uint8_t p_hold;                 // 防的时候按着 ▼ 撑盾的概率(小孩爱按着 ▼)
 } fight_bot_cfg_t;
-extern const fight_bot_cfg_t FIGHT_BOT_EASY, FIGHT_BOT_NORMAL, FIGHT_BOT_HARD, FIGHT_HUMAN_ADULT, FIGHT_HUMAN_KID;
+extern const fight_bot_cfg_t fight_bot_easy, fight_bot_normal, fight_bot_hard, fight_human_adult, fight_human_kid;
 
 typedef struct {
     const fight_bot_cfg_t *cfg;

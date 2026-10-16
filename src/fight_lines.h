@@ -22,4 +22,4 @@
 
 #include "kit_lines.h"
 
-extern const kit_line_t FL_PICK[4], FL_SPECIAL[4], FL_SUPER[4], FL_WIN[4];
+extern const kit_line_t fight_lines_pick[4], fight_lines_special[4], fight_lines_super[4], fight_lines_win[4];
