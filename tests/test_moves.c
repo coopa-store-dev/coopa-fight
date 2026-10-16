@@ -32,6 +32,8 @@ static void test_heavy_armor(void) {
     for (int c = 0; c < FC_COUNT; c++) {
         const fight_move_def_t *h = &fight_char(c)->mv[FM_HEAVY];
         CHECK(h->armor_from > 0 && h->armor_from < h->startup);
+        // 抡的最后 300 ms 轻拳打不断(设计 §4.1);爸爸抡得快,计划里定 250
+        CHECK(h->startup - h->armor_from == (c == FC_DAD ? 250 : 300));
     }
 }
 
