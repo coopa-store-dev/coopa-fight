@@ -1,0 +1,70 @@
+# 四个人的热血头像:从 coopa-bomb 的 src/bomb_sprites.c(HOT_KID / HOT_DAD / HOT_GRANNY / HOT_GRANDPA)原样拷来。
+# 大招特写放大用;皱眉、眼里有光、喊出来。
+== kid
+..y.kkkkkkkk.y..
+...kKKKKKKKKk...
+..kKKKKKKKKKKk..
+.kKKKKKKKKKKKKk.
+.kKKKKKKKKKKKKk.
+.kKssssssssssKk.
+.kskkkssssskkksk
+.ksswkkssskkwssk
+.kssKwssssswKssk
+.kfsssssnsssssfk
+..kssssssssssk..
+..kssskrrksssk..
+...kssskksssk...
+....kssssssk....
+...kzwwttwwzk...
+..kzzzwtTwzzzk..
+== dad
+................
+....kkkkkkkk....
+...kKKKKKKKKk...
+..kKKKKKKKKKKk..
+..kKKKKKKKKKKk..
+..kKssssssssKk..
+.kskkkssssskkksk
+.ksgggssssgggsk.
+.ksgwgssssgwgsk.
+..kssssnnssssk..
+..kskwwwwwwksk..
+..kskrrrrrrksk..
+...kskkkkkksk...
+..kBBwwsswwBBk..
+.kBBBBwBBwBBBBk.
+.kBBBBBBBBBBBBk.
+== granny
+................
+......kkkk......
+.....kKKKKk.....
+...kkKKKKKKkk...
+..kKKKKKKKKKKk..
+..kvvvvvvvvvvk..
+.kVVVVVVVVVVVVk.
+..kkksssssskkk..
+..kKswkssskwsKk.
+..kKfssnnssfKk..
+...kskwwwwksk...
+...kssrrrrssk...
+....kssssssk....
+...kdddssdddk...
+..kddddddddddk..
+.kdxddddddddxdk.
+== grandpa
+................
+....kkkkkkkk....
+...kKKKKKKKKk...
+..kKKKKKKKKKKk..
+..khKKKKKKKKhk..
+..khsssssssshk..
+.kskkkssssskkksk
+.ksswkssssskwssk
+..kssssssnssssk.
+..khhhhhhhhhhk..
+..khkwwwwwwkhk..
+...khhhhhhhhk...
+...keesseexek...
+..keeeesexeeek..
+..keeeeexeeeek..
+..keeexxEeeeek..

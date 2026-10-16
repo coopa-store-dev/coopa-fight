@@ -1,0 +1,115 @@
+# 特效。顺序 = fight_fx_t;大小各不一样(人物都是 16×16)。
+# 晕的星星:头上转圈。
+== star
+....k....
+...kyk...
+kkkkykkkk
+kyyyyyyyk
+.kyyyyyk.
+..kyyyk..
+.kyyoyyk.
+.kyk.kyk.
+.kk...kk.
+# 打中的火花:白芯、黄边、红尖。
+== spark
+.....r......
+..r..y...r..
+...y.y..y...
+....ywwy....
+.yyywwwwyy..
+r..wwwwww.yr
+..yywwwwyy..
+....ywwy....
+...y.yy.y...
+..r..y...r..
+.....r......
+............
+# 挡住的盾:圆的蓝盾牌、白边、黄色盾心,左右对称(两边的人都用这一张)。
+== shield
+...kkkkkk...
+..kwwwwwwk..
+.kwBBBBBBwk.
+kwBwBBBBBBwk
+kwBwBBBBBBwk
+kwBBBkkBBBwk
+kwBBkyykBBwk
+kwBBkyykBBwk
+kwBBBkkBBBwk
+.kwBBBBBBwk.
+..kwBBBBwk..
+...kwwwwk...
+....kkkk....
+# 库巴的弹珠(弹弓)。
+== pellet
+.kkk.
+kwhhk
+khhHk
+khHHk
+.kkk.
+# 奶奶的锅盖(锅盖飞盘):外壳 SPR_POTLID 的字符画拷来,去掉上下空行。
+== lid
+.....kk.....
+....kbbk....
+..kkhhhhkk..
+.khhwhhhhhk.
+khhwhhhhhhHk
+khhhhhhhhHHk
+kkkkkkkkkkkk
+# 爸爸大招的铁笼:coopa-bomb 的 CAGE 拷来。
+== cage
+kkkkkkkkkkkkkkkk
+kgggggggggggggk.
+.g..g..g..g..g..
+.g..g..g..g..g..
+.g..g..g..g..g..
+.g..g..g..g..g..
+.g..g..g..g..g..
+.g..g..g..g..g..
+.g..g..g..g..g..
+.g..g..g..g..g..
+.g..g..g..g..g..
+.g..g..g..g..g..
+.g..g..g..g..g..
+.g..g..g..g..g..
+kgggggggggggggk.
+kkkkkkkkkkkkkkkk
+# 爷爷的太极:coopa-bomb 的 TAIJI 拷来。
+== taiji
+.....kkkkkk.....
+...kkwwwwxxkk...
+..kwwwwwwxxxxk..
+.kwwwwwwxxxxxxk.
+.kwwwxxwxxxxxxk.
+kwwwwxxwxxxxxxxk
+kwwwwwwwxxxxxxxk
+kwwwwwwwwxxxxxxk
+kwwwwwwwwxxxxxxk
+kwwwwwwwxwwxxxxk
+kwwwwwwxxwwxxxxk
+.kwwwwwxxxxxxxk.
+.kwwwwxxxxxxxxk.
+..kwwwxxxxxxxk..
+...kkwwxxxxkk...
+.....kkkkkk.....
+# 奶奶大招最后那一下的擀面杖:外壳 SPR_ROLLER 的字符画拷来,去掉上下空行。
+== roller
+kk........kk
+kbkkkkkkkkbk
+kbknnnnnnkbk
+kbknnnnnnkbk
+kbkkkkkkkkbk
+kk........kk
+# 爸爸大招砸笼子的大锤。
+== hammer
+kkkkkkkkkk
+khhhhhhhHk
+khwhhhhhHk
+khhhhhhhHk
+kkkkkkkkkk
+...kbbk...
+...kbbk...
+...kbbk...
+...kbbk...
+...kbbk...
+...kbbk...
+...kkkk...

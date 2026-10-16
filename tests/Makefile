@@ -4,7 +4,7 @@ CFLAGS := -std=c11 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -fn
           -I../src -I.
 OUT := .build
 HDRS := $(wildcard ../src/*.h) $(wildcard *.h)
-TESTS := test_moves test_sim test_super test_game test_link test_bot test_local test_balance test_save
+TESTS := test_moves test_sim test_super test_game test_link test_bot test_local test_balance test_save test_art
 
 # 语音解码测试要外壳的解码器:make -C tests COOPA_SHELL=外壳目录(没给就跳过)
 ifneq ($(COOPA_SHELL),)
@@ -44,6 +44,10 @@ $(OUT)/test_local: test_local.c ../src/fight_local.c ../src/fight_bot.c ../src/f
 
 $(OUT)/test_save: test_save.c ../src/fight_save.c $(HDRS) | $(OUT)
 	$(CC) $(CFLAGS) $(filter %.c,$^) -o $@
+
+# 常量图:宿主上没有 LVGL,用 stub/lvgl.h(只有 lv_image_dsc_t)
+$(OUT)/test_art: test_art.c ../src/fight_art.c $(HDRS) stub/lvgl.h | $(OUT)
+	$(CC) $(CFLAGS) -Istub $(filter %.c,$^) -o $@
 
 $(OUT)/test_lines: test_lines.c ../src/fight_lines.c $(COOPA_SHELL)/main/kit_voice_dsp.c | $(OUT)
 	$(CC) $(CFLAGS) -I$(COOPA_SHELL)/main $(filter %.c,$^) -o $@
