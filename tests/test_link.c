@@ -494,14 +494,14 @@ static void test_burst_reanchor(void) {
 
 // ---- 被连方的画面跟上主动方的现在(坐哪张卡都一样)----
 
-static int EVS[2][FE_TIMEUP + 1][2][FM_COUNT];   // [哪张卡][种类][who][招]:跑的时候收到的 GE_SIM
+static int EVS[2][FE_KINDS][2][FM_COUNT];   // [哪张卡][种类][who][招]:跑的时候收到的 GE_SIM
 
 static void count_events(void) {
     for (int c = 0; c < 2; c++) {
         uint8_t e;
         fight_ev_t se;
         while (fight_game_event(side(c), &e, &se))
-            if (e == GE_SIM && se.kind <= FE_TIMEUP && se.who < 2 && se.move < FM_COUNT) EVS[c][se.kind][se.who][se.move]++;
+            if (e == GE_SIM && se.kind < FE_KINDS && se.who < 2 && se.move < FM_COUNT) EVS[c][se.kind][se.who][se.move]++;
     }
 }
 
@@ -668,6 +668,20 @@ static void test_passive_feedback(void) {
         press(!me, FK_DOWN_LONG);
         run_count(1200);
         CHECK(evs(0, FE_GUARD_BREAK, me) == 1 && evs(1, FE_GUARD_BREAK, me) == 1);
+        CHECK(evs(0, FE_HIT, me) == 0 && evs(1, FE_HIT, me) == 0);
+    }
+    // 弹开:爸爸的重击打到前 0.1 秒才举盾,两张卡都是「弹开」,没有打中、没有破防
+    for (int me = 0; me < 2; me++) {
+        test_seed(76);
+        begin_as(me ? FC_KID : FC_DAD, me ? FC_DAD : FC_KID, 35, 0);
+        run(2500);
+        clear_events();
+        press(me, FK_UP);
+        run_count(fight_char(FC_DAD)->mv[FM_HEAVY].startup - 100);
+        press(!me, FK_DOWN);
+        run_count(1200);
+        CHECK(evs(0, FE_PARRY, !me) == 1 && evs(1, FE_PARRY, !me) == 1);
+        CHECK(evs(0, FE_GUARD_BREAK, me) == 0 && evs(1, FE_GUARD_BREAK, me) == 0);
         CHECK(evs(0, FE_HIT, me) == 0 && evs(1, FE_HIT, me) == 0);
     }
     // 被连方按了 ▼(自己卡上先画了盾),但 ▼ 到主动方时重击已经打中了:主动方是普通打中,被连方卡上也不能是「破防！」

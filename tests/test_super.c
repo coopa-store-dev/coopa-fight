@@ -8,8 +8,8 @@
     printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #c); exit(1); } } while (0)
 
 static fight_sim_t S;
-static int EV[FE_TIMEUP + 1][2];   // 每种事件、每个 who 来了几条(who = FIGHT_DRAW 记在 [0])
-static fight_ev_t LAST[FE_TIMEUP + 1];
+static int EV[FE_KINDS][2];   // 每种事件、每个 who 来了几条(who = FIGHT_DRAW 记在 [0])
+static fight_ev_t LAST[FE_KINDS];
 
 static void pump(void) {
     fight_ev_t e;
@@ -23,7 +23,7 @@ static int ev_by(uint8_t kind, int who) { pump(); return EV[kind][who]; }
 
 static void start(uint8_t c0, uint8_t c1, uint16_t g0, uint16_t g1) {
     fight_sim_init(&S, c0, c1, g0, g1);
-    for (int k = 0; k <= FE_TIMEUP; k++) EV[k][0] = EV[k][1] = 0;
+    for (int k = 0; k < FE_KINDS; k++) EV[k][0] = EV[k][1] = 0;
 }
 static void run_to(uint32_t clock) { while (S.clock < clock && S.winner == FIGHT_UNDECIDED) fight_sim_step(&S); }
 static void key(int who, uint8_t k) { fight_sim_key(&S, (uint8_t)who, k); }
@@ -584,26 +584,28 @@ static void test_special_held_down(void) {
 static void test_long_down_queued(void) {
     start(FC_KID, FC_DAD, 0, 0);
     key(1, FK_DOWN);
-    key(0, FK_OK);          // 180 打到盾上,库巴被挡僵到 1030
+    run_to(30);             // 盾举了 FIGHT_PARRY_MS 以上才打到:挡住,不是弹开
+    key(0, FK_OK);          // 210 打到盾上,库巴被挡僵到 1060
     run_to(250);
     CHECK(S.f[0].st == FS_BLOCKSTUN);
     key(0, FK_DOWN);        // 排着
     run_to(750);
     key(0, FK_DOWN_LONG);   // 还在僵着、▼ 还排着
     CHECK(S.f[0].st == FS_BLOCKSTUN && S.f[0].qn == 1);
-    run_to(1040);
+    run_to(1070);
     CHECK(S.f[0].st == FS_GUARD && S.f[0].long_guard && S.f[0].dur == fight_char(FC_KID)->guard_long_ms);
-    run_to(1700);
+    run_to(1730);
     CHECK(S.f[0].st == FS_GUARD);
     key(0, FK_UP);
     CHECK(S.f[0].st == FS_MOVE && S.f[0].move == FM_SPECIAL);
     // 对照:没长按,盾只举 guard_ms
     start(FC_KID, FC_DAD, 0, 0);
     key(1, FK_DOWN);
+    run_to(30);
     key(0, FK_OK);
     run_to(250);
     key(0, FK_DOWN);
-    run_to(1040);
+    run_to(1070);
     CHECK(S.f[0].st == FS_GUARD && !S.f[0].long_guard && S.f[0].dur == fight_char(FC_KID)->guard_ms);
 }
 

@@ -17,9 +17,34 @@
 // WIN_DAD: 谁也别想赢过我！
 // WIN_GRANNY: 服不服？
 // WIN_GRANDPA: 姜还是老的辣！
+// HEAVY_KID: 嘿呀！
+// HEAVY_DAD: 喝！
+// HEAVY_GRANNY: 嘿！
+// HEAVY_GRANDPA: 哈！
+// HURT_KID: 哎哟！
+// HURT_DAD: 呃啊！
+// HURT_GRANNY: 哎哟喂！
+// HURT_GRANDPA: 哎哟！
+// DOWN_KID: 呜哇！
+// DOWN_DAD: 哎呀！
+// DOWN_GRANNY: 哎呀我的老腰！
+// DOWN_GRANDPA: 老骨头散架喽！
+// PARRY_KID: 看穿啦！
+// PARRY_DAD: 早看出来了！
+// PARRY_GRANNY: 想得美！
+// PARRY_GRANDPA: 太急喽！
+// CALL_ROUND1: 第一回合！
+// CALL_ROUND2: 第二回合！
+// CALL_FINAL: 决胜局！
+// CALL_FIGHT: 开打！
+// CALL_KO: K，O！
+// CALL_TIMEUP: 时间到！
 
 #pragma once
 
 #include "kit_lines.h"
 
-extern const kit_line_t fight_lines_pick[4], fight_lines_special[4], fight_lines_super[4], fight_lines_win[4];
+extern const kit_line_t fight_lines_pick[4], fight_lines_special[4], fight_lines_super[4], fight_lines_win[4], fight_lines_heavy[4], fight_lines_hurt[4], fight_lines_down[4], fight_lines_parry[4];
+
+enum { FCALL_ROUND1, FCALL_ROUND2, FCALL_FINAL, FCALL_FIGHT, FCALL_KO, FCALL_TIMEUP, FCALL_COUNT };  // 裁判
+extern const kit_line_t fight_lines_call[FCALL_COUNT];

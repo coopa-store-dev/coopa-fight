@@ -8,8 +8,8 @@
     printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #c); exit(1); } } while (0)
 
 static fight_sim_t S;
-static int EV[FE_TIMEUP + 1][2];   // 每种事件、每个 who 来了几条(who = FIGHT_DRAW 记在 [0])
-static fight_ev_t LAST[FE_TIMEUP + 1];
+static int EV[FE_KINDS][2];   // 每种事件、每个 who 来了几条(who = FIGHT_DRAW 记在 [0])
+static fight_ev_t LAST[FE_KINDS];
 
 static void pump(void) {
     fight_ev_t e;
@@ -23,7 +23,7 @@ static int ev_by(uint8_t kind, int who) { pump(); return EV[kind][who]; }
 
 static void start(uint8_t c0, uint8_t c1, uint16_t g0, uint16_t g1) {
     fight_sim_init(&S, c0, c1, g0, g1);
-    for (int k = 0; k <= FE_TIMEUP; k++) EV[k][0] = EV[k][1] = 0;
+    for (int k = 0; k < FE_KINDS; k++) EV[k][0] = EV[k][1] = 0;
 }
 static void run_to(uint32_t clock) { while (S.clock < clock && S.winner == FIGHT_UNDECIDED) fight_sim_step(&S); }
 static void key(int who, uint8_t k) { fight_sim_key(&S, (uint8_t)who, k); }
@@ -51,21 +51,79 @@ static void test_jab_hits_idle(void) {
     CHECK(S.f[0].st == FS_IDLE);
 }
 
+// 盾举起来过了 FIGHT_PARRY_MS 才打到:挡住(不是弹开)
 static void test_guard_blocks_jab(void) {
     start(FC_GRANNY, FC_KID, 0, 0);
     key(1, FK_DOWN);
     CHECK(S.f[1].st == FS_GUARD && S.f[1].dur == fight_char(FC_KID)->guard_ms);
+    run_to(100);
     key(0, FK_OK);
-    run_to(200);
+    run_to(300);
     CHECK(S.f[1].hp == hp_max(1));
     CHECK(S.f[0].st == FS_BLOCKSTUN && S.f[0].dur == 100 + 250 + FIGHT_BLOCKSTUN);
     CHECK(S.f[0].gauge == FIGHT_GAUGE_BLOCK && S.f[1].gauge == FIGHT_GAUGE_BLOCK);
     CHECK(S.f[0].chain == 0 && !S.f[0].chain_open);
-    CHECK(ev_by(FE_BLOCK, 0) == 1 && ev(FE_HIT) == 0);
-    run_to(200 + 100 + 250 + FIGHT_BLOCKSTUN - 10);
+    CHECK(ev_by(FE_BLOCK, 0) == 1 && ev(FE_HIT) == 0 && ev(FE_PARRY) == 0);
+    run_to(300 + 100 + 250 + FIGHT_BLOCKSTUN - 10);
     CHECK(S.f[0].st == FS_BLOCKSTUN);
-    run_to(200 + 100 + 250 + FIGHT_BLOCKSTUN);
+    run_to(300 + 100 + 250 + FIGHT_BLOCKSTUN);
     CHECK(S.f[0].st == FS_IDLE);
+}
+
+// 盾刚举起来(FIGHT_PARRY_MS 内)打到:弹开。出拳的人僵住,弹开的人马上能动、盾不进冷却、白拿气,下一拳接得上
+static void test_parry_jab(void) {
+    start(FC_GRANNY, FC_KID, 0, 0);
+    key(0, FK_OK);
+    run_to(200 - FIGHT_PARRY_MS + 10);
+    key(1, FK_DOWN);   // 拳 200 打到:盾举了 FIGHT_PARRY_MS − 10
+    run_to(200);
+    CHECK(ev_by(FE_PARRY, 1) == 1 && LAST[FE_PARRY].move == FM_JAB && ev(FE_BLOCK) == 0 && ev(FE_HIT) == 0);
+    CHECK(S.f[1].hp == hp_max(1) && S.f[1].st == FS_IDLE && S.f[1].guard_cool == 0);
+    CHECK(S.f[1].gauge == FIGHT_GAUGE_PARRY && S.f[0].gauge == 0);
+    CHECK(S.f[0].st == FS_HITSTUN && S.f[0].dur == FIGHT_PARRY_STUN && S.f[0].qn == 0);
+    CHECK(S.f[1].chain == 1 && S.f[1].chain_open);
+    key(1, FK_OK);   // 反打:连招的第二拳,打得中僵着的人
+    CHECK(S.f[1].move == FM_JAB2);
+    run_to(200 + su(FC_KID, FM_JAB2));
+    CHECK(S.f[0].hp == hp_max(0) - dmg(FC_KID, FM_JAB2) && S.f[1].chain == 2);
+}
+
+// 盾举了正好 FIGHT_PARRY_MS 才打到:只是挡住
+static void test_parry_window_edge(void) {
+    start(FC_GRANNY, FC_KID, 0, 0);
+    key(1, FK_DOWN);
+    run_to(FIGHT_PARRY_MS - 200);
+    key(0, FK_OK);   // 200 后打到:盾那时正好举了 FIGHT_PARRY_MS
+    run_to(FIGHT_PARRY_MS);
+    CHECK(ev(FE_PARRY) == 0 && ev_by(FE_BLOCK, 0) == 1 && S.f[0].st == FS_BLOCKSTUN);
+}
+
+// 重击也弹得开(不砸开);弹开以后 ▼ ● 能出大招
+static void test_parry_heavy_then_super(void) {
+    start(FC_KID, FC_DAD, 0, FIGHT_GAUGE_BAR);
+    key(0, FK_UP);
+    run_to(su(FC_KID, FM_HEAVY) - 100);
+    key(1, FK_DOWN);
+    run_to(su(FC_KID, FM_HEAVY));
+    CHECK(ev_by(FE_PARRY, 1) == 1 && ev(FE_GUARD_BREAK) == 0 && S.f[1].hp == hp_max(1));
+    CHECK(S.f[0].st == FS_HITSTUN);
+    key(1, FK_DOWN);
+    key(1, FK_OK);
+    CHECK(S.f[1].st == FS_SUPER_OUT && ev_by(FE_SUPER, 1) == 1);
+}
+
+// 奶奶锅盖的第二下不算弹开(照常挡住 / 打中)
+static void test_parry_not_second_hit(void) {
+    start(FC_GRANNY, FC_KID, 0, 0);
+    key(0, FK_DOWN);
+    key(0, FK_UP);   // 锅盖:250 打到、900 飞回来
+    run_to(400);
+    CHECK(S.f[1].hp < hp_max(1));
+    run_to(860);   // 第一下的僵直 850 完
+    CHECK(S.f[1].st == FS_IDLE);
+    key(1, FK_DOWN);
+    run_to(900);
+    CHECK(ev(FE_PARRY) == 0 && ev_by(FE_BLOCK, 0) == 1);
 }
 
 static void test_heavy_breaks_guard(void) {
@@ -595,6 +653,10 @@ static void test_chains_still_connect(void) {
 int main(void) {
     test_jab_hits_idle();
     test_guard_blocks_jab();
+    test_parry_jab();
+    test_parry_window_edge();
+    test_parry_heavy_then_super();
+    test_parry_not_second_hit();
     test_heavy_breaks_guard();
     test_jab_interrupts_heavy_early();
     test_heavy_armor_late();

@@ -49,7 +49,7 @@
 #define TX_HELP_HEAVY "▲ 重击"
 #define TX_HELP_HEAVY_WHAT "砸开防御"
 #define TX_HELP_GUARD "▼ 防"
-#define TX_HELP_GUARD_WHAT "挡住拳"
+#define TX_HELP_GUARD_WHAT "挡拳，看准弹开"
 #define TX_HELP_SPECIAL "▼ ▲"
 #define TX_HELP_SPECIAL_WHAT "小招，不花气"
 #define TX_HELP_SUPER "● 打中后马上"
@@ -73,6 +73,7 @@
 #define TX_MASH "狂按挣脱！"
 #define TX_BREAK "破防！"
 #define TX_COUNTER "接住！"
+#define TX_PARRY "弹开！"
 
 // 结束页
 #define TX_WIN "你赢了！"

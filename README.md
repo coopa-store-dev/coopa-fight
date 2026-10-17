@@ -5,9 +5,9 @@
 # Coopa Fight (库巴格斗)
 
 A three-button family fighting game: pick a family member and fight face to face. Land a ● jab and press ▼ ● right
-away to link into a super — black-screen close-up, the move's name shouted out, a third of the health bar gone, and
-the other side is dizzy until they mash free. It's not about fast fingers, it's about guessing what the other side
-does next.
+away to link into a super — black-screen close-up, the move's name shouted out, 30% of the health bar gone, and the
+other side is dizzy until they mash free. It's not about fast fingers, it's about guessing what the other side
+does next and timing your guard.
 
 - **Vs computer**: play alone against the other three family members (easy → normal → hard). Beat all three and that
   character gets a crown on the pick screen.
@@ -22,7 +22,7 @@ round). First to 2 rounds wins.
 |---|---|
 | ● | **Jab**: fast (lands in 0.18–0.24 s), small damage |
 | ▲ | **Heavy**: 0.55–0.65 s wind-up, big damage, breaks a guard (the guard breaks and they are dizzy for 1 s) |
-| ▼ | **Guard**: shield up for 0.6 s (Grandma 0.8 s), blocks jabs and specials; hold ▼ to keep it up to 1.2 s |
+| ▼ | **Guard**: shield up for 0.6 s (Grandma 0.8 s), blocks jabs and specials; hold ▼ to keep it up to 1.2 s. Hit within 0.2 s of raising it: **parry** |
 | ▼ ▲ | **Special**: comes out from behind the shield, costs no energy; 1 s before the next one |
 | ● hits, then ● | Another jab, up to three in a row |
 | ● hits, then ▲ | **Linked heavy**: no wind-up, always lands |
@@ -31,16 +31,20 @@ round). First to 2 rounds wins.
 
 - **Rock, paper, scissors**: a jab interrupts a heavy early in its wind-up (the first 0.3 s); a heavy breaks a guard;
   a guard blocks a jab and the jabber is stuck an extra 0.5 s, so the blocker can punish.
+- **Parry (time your guard)**: press ▼ just before a hit lands — if the shield has been up for less than 0.2 s, the hit
+  bounces off. Heavies and Dad's shoulder charge can be parried too. The attacker is stuck for 1 s; the parrier can
+  move at once, gets 0.4 of an energy cell, and their next ● is the next jab of a combo — ▼ ● goes straight into a
+  super. This is what beats button mashing: after three jabs the masher has to start over, so time ▼ for that jab.
 - **Combos**: a landed jab stuns the other side for 0.6 s, and the next button pressed in that time links. You can
   press ahead; buttons pressed ahead come out whether the jab landed or not — if it missed, ▼ ● is just a guard and a
   jab, and you can be punished.
 - **Tap ▼ ● quickly, "da-da-da"**: ● does nothing while ▼ is held, so let go of ▼ before pressing ●. ▲ / ● within
   0.35 s after ▼ counts as a special / super; ▲ while that ▼'s shield is still up (holding ▼ and pressing ▲) is a
   special too.
-- **Energy**: 3 cells. Landing, getting hit and blocking all fill it, getting hit the most; the side behind on health
+- **Energy**: 3 cells. Landing, getting hit, blocking and parrying all fill it, getting hit the most; the side behind on health
   fills a bit more when hit. Energy carries over to the next round.
-- **When a super lands**: both cards play a 1.5 s close-up (the clock stops and buttons don't count), 330 damage (a
-  third of a full bar), then the other side is dizzy for 2 s. Mash to wake up sooner: 0.16 s per press, at most 6
+- **When a super lands**: both cards play a 1.5 s close-up (the clock stops and buttons don't count), 300 damage (30%
+  of a full bar), then the other side is dizzy for 2 s. Mash to wake up sooner: 0.16 s per press, at most 6
   presses a second count. Getting hit by one combo while dizzy wakes you up; for 0.3 s after waking, buttons are
   ignored and you can't be hit.
 - **No dizzy loops**: from being knocked dizzy until you can move again, you can't be made dizzy again or take a super

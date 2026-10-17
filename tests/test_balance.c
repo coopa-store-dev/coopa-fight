@@ -71,7 +71,7 @@ typedef struct {
     uint32_t ms;          // 一场多久(真的时间)
     uint32_t supers[2];   // 打中几次大招
     uint32_t rounds, kos; // 打了几回合、其中 KO 结束的
-    uint32_t ev[FE_TIMEUP + 1][2];  // 每种事件、每个 who 几条(FE_TRADE 记在 [0])
+    uint32_t ev[FE_KINDS][2];  // 每种事件、每个 who 几条(FE_TRADE 记在 [0])
 } result_t;
 
 static result_t match(player_t *p0, uint8_t c0, player_t *p1, uint8_t c1) {
@@ -95,7 +95,7 @@ static result_t match(player_t *p0, uint8_t c0, player_t *p1, uint8_t c1) {
             fight_ev_t e;
             while (fight_sim_event(&s, &e)) {
                 if (e.kind == FE_SUPER) r.supers[e.who]++;
-                if (e.kind <= FE_TIMEUP && e.who < 2) r.ev[e.kind][e.who]++;
+                if (e.kind < FE_KINDS && e.who < 2) r.ev[e.kind][e.who]++;
             }
         }
         r.rounds++;
@@ -120,7 +120,7 @@ static bool play(player_t *a, uint8_t ca, player_t *b, uint8_t cb, int i, result
         uint32_t t = r.supers[0];
         r.supers[0] = r.supers[1];
         r.supers[1] = t;
-        for (int k = 0; k <= FE_TIMEUP; k++) {
+        for (int k = 0; k < FE_KINDS; k++) {
             t = r.ev[k][0];
             r.ev[k][0] = r.ev[k][1];
             r.ev[k][1] = t;
@@ -144,22 +144,23 @@ static bool expect(bool c, const char *what) {
 }
 
 // 一批场的统计(每人每场平均)
-typedef struct { double n, ms, rounds, kos, ev[FE_TIMEUP + 1][2]; } tally_t;
+typedef struct { double n, ms, rounds, kos, ev[FE_KINDS][2]; } tally_t;
 static void tally(tally_t *t, const result_t *r) {
     t->n++;
     t->ms += r->ms;
     t->rounds += r->rounds;
     t->kos += r->kos;
-    for (int k = 0; k <= FE_TIMEUP; k++)
+    for (int k = 0; k < FE_KINDS; k++)
         for (int w = 0; w < 2; w++) t->ev[k][w] += r->ev[k][w];
 }
 static void tally_print(const tally_t *t, const char *a, const char *b) {
     printf("  一场 %.0f 秒、%.1f 回合(KO %.0f%%);每场(%s / %s):大招 %.2f / %.2f、打中 %.1f / %.1f、被挡 %.1f / %.1f、"
-           "砸开 %.2f / %.2f、太极接住 %.2f / %.2f、互相打中 %.1f\n",
+           "砸开 %.2f / %.2f、太极接住 %.2f / %.2f、弹开 %.2f / %.2f、互相打中 %.1f\n",
            t->ms / t->n / 1000, t->rounds / t->n, 100 * t->kos / t->rounds, a, b, t->ev[FE_SUPER][0] / t->n,
            t->ev[FE_SUPER][1] / t->n, t->ev[FE_HIT][0] / t->n, t->ev[FE_HIT][1] / t->n, t->ev[FE_BLOCK][0] / t->n,
            t->ev[FE_BLOCK][1] / t->n, t->ev[FE_GUARD_BREAK][0] / t->n, t->ev[FE_GUARD_BREAK][1] / t->n,
-           t->ev[FE_COUNTER][0] / t->n, t->ev[FE_COUNTER][1] / t->n, t->ev[FE_TRADE][0] / t->n);
+           t->ev[FE_COUNTER][0] / t->n, t->ev[FE_COUNTER][1] / t->n, t->ev[FE_PARRY][0] / t->n,
+           t->ev[FE_PARRY][1] / t->n, t->ev[FE_TRADE][0] / t->n);
 }
 
 static double pc(uint32_t a, uint32_t b) { return b ? 100.0 * a / b : 0; }
@@ -229,7 +230,7 @@ int main(int argc, char **argv) {
     printf("\n");
     tally_print(&ta, "大人", "大人");
     double avg_s = ta.ms / ta.n / 1000;
-    expect(avg_s >= 90 && avg_s <= 210, "一场平均 90–210 秒");
+    expect(avg_s >= 50 && avg_s <= 100, "一场平均 50–100 秒(1.1 加快)");
 
     // 2. 小孩对大人:16 种组合(小孩的角色 × 大人的角色)各 pair_n 场(两边轮着坐 0 号);每格 ≥ KID_CELL_MIN,16 格平均 ≥ KID_WIN_MIN
     printf("== 小孩(行)对大人(列):每格 %d 场,小孩胜率 / 小孩打中过大招的场 ==\n", pair_n);
@@ -265,14 +266,14 @@ int main(int argc, char **argv) {
     tally_print(&tk, "小孩", "大人");
     double kid_mean = kid_sum / 16, kid_sup = tk.ev[FE_SUPER][0] / tk.n, kms = tk.ms / tk.n / 1000;
     bool gm = expect(kid_mean >= KID_WIN_MIN, "小孩对大人 16 格平均 ≥ KID_WIN_MIN");
-    bool gs = expect(kid_sup <= 2.0, "小孩每场大招 ≤ 2.0(设计 §4.3「一两次」)");
-    bool gl = expect(kms >= 90 && kms <= 240, "小孩对大人一场平均 90–240 秒");
-    printf("  小孩胜率:最低 %.0f%%(每格 ≥ %d%%)、平均 %.1f%%%s(≥ %d%%);小孩每场大招 %.2f%s(≤ 2.0);一场 %.0f 秒%s\n", kid_min,
+    bool gs = expect(kid_sup >= 1.0 && kid_sup <= 3.0, "小孩每场大招 1–3(1.1:比 1.0 快)");
+    bool gl = expect(kms >= 50 && kms <= 110, "小孩对大人一场平均 50–110 秒");
+    printf("  小孩胜率:最低 %.0f%%(每格 ≥ %d%%)、平均 %.1f%%%s(≥ %d%%);小孩每场大招 %.2f%s(1–3);一场 %.0f 秒%s\n", kid_min,
            KID_CELL_MIN, kid_mean, mark(gm), KID_WIN_MIN, kid_sup, mark(gs), kms, mark(gl));
 
     // 3. ● ▼ ● 在 ● 打中的前提下出了大招
     double sa = pc(ad_ok, ad_try), sk = pc(kid_ok, kid_try);
-    bool ga = expect(sa >= 85, "大人 ●▼● 成功率 ≥ 85%"), gk = expect(sk >= 55, "小孩 ●▼● 成功率 ≥ 55%");
+    bool ga = expect(sa >= 75, "大人 ●▼● 成功率 ≥ 75%(打中的那一拳可能被弹开)"), gk = expect(sk >= 40, "小孩 ●▼● 成功率 ≥ 40%");
     printf("== ●▼● 打中后出了大招:大人 %.0f%%%s(%u 次)、小孩 %.0f%%%s(%u 次)==\n", sa, mark(ga), ad_try, sk, mark(gk),
            kid_try);
 
@@ -291,18 +292,23 @@ int main(int argc, char **argv) {
     printf("\n");
     for (int ds = 0; ds < DS_COUNT; ds++) {
         printf("  %-14s", DS_NAME[ds]);
+        uint32_t parried = 0;  // 大人弹开了几次
         for (uint8_t c = 0; c < FC_COUNT; c++) {
             s_x = 4000u + 10u * (uint32_t)ds + c;
             uint32_t won = 0;
             for (int i = 0; i < n; i++) {
                 player_dead(&A, ds);
                 player_bot(&B, &fight_human_adult);
-                won += play(&A, c, &B, (uint8_t)(i / 2 % FC_COUNT), i, NULL);
+                result_t r;
+                won += play(&A, c, &B, (uint8_t)(i / 2 % FC_COUNT), i, &r);
+                parried += r.ev[FE_PARRY][1];
             }
             double w = pc(won, (uint32_t)n);
-            printf("   %4.0f%%%s", w, mark(expect(w <= 60, "死打法打大人 ≤ 60%")));
+            bool ok = expect(w <= 60, "死打法打大人 ≤ 60%");
+            if (ds == DS_JAB) ok = expect(w <= 40, "一直● 打大人 ≤ 40%(1.1:乱按会被弹开)") && ok;
+            printf("   %4.0f%%%s", w, mark(ok));
         }
-        printf("\n");
+        printf("   (大人每场弹开 %.1f)\n", (double)parried / (FC_COUNT * n));
     }
     for (uint8_t c = FC_DAD; c <= FC_GRANDPA; c += FC_GRANDPA - FC_DAD) {
         s_x = 5000u + c;

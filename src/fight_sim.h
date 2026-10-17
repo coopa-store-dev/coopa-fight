@@ -5,7 +5,8 @@
 // 一步的顺序(两人固定,先算判定再统一结算):
 //   1. clock、两人的 t 往前走,冷却、刚醒吃键、晕往下减;
 //   2. 两人这一步谁打到判定(出招的 t 正好到 startup;锅盖飞回来);两边出招都打到 = 互相打中;
-//   3. 结算打到:打空(刚醒;对方挨打僵着、这一下又不是连招里的)/ 太极接住 / 挡住 / 砸开防御 / 打中 / 重击后半段只扣轻拳的血;扣血、涨气、进僵直或晕;
+//   3. 结算打到:打空(刚醒;对方挨打僵着、这一下又不是连招里的)/ 太极接住 / 弹开(盾刚举起来)/ 挡住 / 砸开防御 / 打中 /
+//      重击后半段只扣轻拳的血;扣血、涨气、进僵直或晕;
 //      锅盖第二下在这之后算;
 //   4. 有人血空 → KO,这一回合结束;
 //   5. 到时间的状态回 FS_IDLE(晕到 0 醒、太极收招、保护消失);排着的键按顺序出(连招里按连招解释);
@@ -26,11 +27,11 @@
 #define FIGHT_PREFIX_MS 350   // ▼ 前缀:按 ▼ 后这么久内的 ▲ / ● 算小招 / 大招
 #define FIGHT_ROUND_MS 60000
 #define FIGHT_LATE_MAX 400    // 联机晚到的键最多按本来的时刻补算这么久
-#define FIGHT_GAUGE_HIT 6     // 打中
-#define FIGHT_GAUGE_HURT 15   // 挨打
-#define FIGHT_GAUGE_BEHIND 50 // 挨打时血比对方少 FIGHT_BEHIND 以上再加
+#define FIGHT_GAUGE_HIT 20     // 打中
+#define FIGHT_GAUGE_HURT 50   // 挨打
+#define FIGHT_GAUGE_BEHIND 100 // 挨打时血比对方少 FIGHT_BEHIND 以上再加
 #define FIGHT_BEHIND 200      // 满血 1000 制
-#define FIGHT_GAUGE_BLOCK 5   // 挡住、被挡都加
+#define FIGHT_GAUGE_BLOCK 15   // 挡住、被挡都加
 #define FIGHT_EVQ 16
 #define FIGHT_UNDECIDED 2     // winner:还没分出
 #define FIGHT_DRAW 3          // winner:平
@@ -46,6 +47,9 @@
 #define FIGHT_WAKE_EAT 300     // 醒后这么久不收键,也不挨打
 #define FIGHT_STANCE_MS 1000
 #define FIGHT_SPECIAL_COOL 1000 // 小招出完这么久内不能再出
+#define FIGHT_PARRY_MS 200     // 完美防御:招打到时盾举起来还不到这么久(< )= 弹开(重击、肩撞也弹得开;锅盖第二下不算)
+#define FIGHT_PARRY_STUN 1000   // 被弹开的人僵这么久(弹开的人的连招窗口也开这么久)
+#define FIGHT_GAUGE_PARRY 400  // 弹开白拿的气
 
 typedef enum { FK_UP = 0, FK_DOWN, FK_OK, FK_DOWN_LONG } fight_key_t;   // 和 kit_key_t 对应;长按只认 ▼
 typedef enum {
@@ -92,9 +96,10 @@ typedef struct {
 //   FE_COUNTER     接住反打的人(爷爷)
 //   FE_KO          倒下的人(move = 打倒他的那一招);两人一起倒就两条
 //   FE_TIMEUP      赢的人(0/1;FIGHT_DRAW = 平)
+//   FE_PARRY       弹开的人(完美防御;move = 被弹开的那一招)
 typedef enum {
     FE_NONE = 0, FE_START, FE_HIT, FE_BLOCK, FE_WHIFF, FE_GUARD_BREAK, FE_TRADE, FE_SUPER, FE_DIZZY, FE_WAKE,
-    FE_COUNTER, FE_KO, FE_TIMEUP
+    FE_COUNTER, FE_KO, FE_TIMEUP, FE_PARRY, FE_KINDS
 } fight_ev_kind_t;
 typedef struct { uint8_t kind, who, move; } fight_ev_t;
 typedef struct {

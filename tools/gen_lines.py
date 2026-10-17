@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""生成库巴格斗四个角色的专属语音(选人、小招、大招、赢了),编进游戏里。
+"""生成库巴格斗的语音,编进游戏里:四个角色的专属语音(选人、小招、大招、赢了、重击、挨重的、倒下、弹开)和裁判。
 
 用微软神经网络语音合成(edge-tts 包,要联网),转成 16 kHz 单声道,去掉小喇叭放不出的低频、
 裁掉前后静音、把峰值调到 16000,存成 IMA ADPCM(ffmpeg adpcm_ima_wav,块 1024 字节,trellis 搜索),
 格式和 Coopa OS 内置台词一样,用 sfx_play_line 播放。
 
-台词规矩:只说自己,或者对着「你」说,不点对方是谁(对面可能是任何一个家人)。
+台词规矩:只说自己,或者对着「你」说,不点对方是谁(对面可能是任何一个家人)。裁判只报回合、开打、KO、时间到。
 
 用法:brew install ffmpeg;python3 -m venv ~/.venvs/coopa-tts && ~/.venvs/coopa-tts/bin/pip install edge-tts
       ~/.venvs/coopa-tts/bin/python tools/gen_lines.py [--all]
@@ -33,21 +33,25 @@ GRANNY = ("zh-CN-shaanxi-XiaoniNeural", "-10Hz", "+0%")   # 陕西话
 GRANDPA = ("zh-CN-YunjianNeural", "-15Hz", "-10%")
 DAD = ("zh-CN-YunjianNeural", "+0Hz", "+5%")
 KID = ("zh-CN-YunxiaNeural", "+0Hz", "+5%")               # 小男孩
+REF = ("zh-CN-YunyangNeural", "+0Hz", "+10%")             # 裁判
 
 FIGHTERS = [("KID", KID), ("DAD", DAD), ("GRANNY", GRANNY), ("GRANDPA", GRANDPA)]  # 顺序 = fight_char_t
-KINDS = ["PICK", "SPECIAL", "SUPER", "WIN"]  # 公开数组 fight_lines_pick / _special / _super / _win
+KINDS = ["PICK", "SPECIAL", "SUPER", "WIN", "HEAVY", "HURT", "DOWN", "PARRY"]  # 公开数组 fight_lines_pick / _special / …
 TEXT = {
-    "KID": ["库巴来啦！", "弹弓，发射！", "影分身乱打！", "耶！我赢啦！"],
-    "DAD": ["放马过来吧！", "看我肩撞！", "铁笼大锤！", "谁也别想赢过我！"],
-    "GRANNY": ["看奶奶的厉害！", "锅盖飞盘！", "念叨风暴！", "服不服？"],
-    "GRANDPA": ["爷爷来陪你耍。", "太极推手！", "太极，排山倒海！", "姜还是老的辣！"],
+    "KID": ["库巴来啦！", "弹弓，发射！", "影分身乱打！", "耶！我赢啦！", "嘿呀！", "哎哟！", "呜哇！", "看穿啦！"],
+    "DAD": ["放马过来吧！", "看我肩撞！", "铁笼大锤！", "谁也别想赢过我！", "喝！", "呃啊！", "哎呀！", "早看出来了！"],
+    "GRANNY": ["看奶奶的厉害！", "锅盖飞盘！", "念叨风暴！", "服不服？", "嘿！", "哎哟喂！", "哎呀我的老腰！", "想得美！"],
+    "GRANDPA": ["爷爷来陪你耍。", "太极推手！", "太极，排山倒海！", "姜还是老的辣！", "哈！", "哎哟！", "老骨头散架喽！", "太急喽！"],
 }
+# 裁判:名字(头文件里的枚举 FCALL_*)、台词;公开数组 fight_lines_call[FCALL_COUNT]
+CALLS = [("ROUND1", "第一回合！"), ("ROUND2", "第二回合！"), ("FINAL", "决胜局！"), ("FIGHT", "开打！"),
+         ("KO", "K，O！"), ("TIMEUP", "时间到！")]
 
 HIGHPASS_HZ = 120
 TARGET_PEAK = 16000
 SAMPLE_RATE = 16000
 MAX_SECONDS = 2.5
-MAX_KB = 180
+MAX_KB = 320
 TRIM_LEVEL = 300
 PAD = SAMPLE_RATE * 30 // 1000
 ADPCM_BLOCK = 1024
@@ -130,20 +134,23 @@ def main() -> int:
     lines = []  # (名字, 台词, ADPCM, 样本数)
     with tempfile.TemporaryDirectory() as d:
         tmp = Path(d)
-        for kind_i, kind in enumerate(KINDS):
-            for fighter, voice in FIGHTERS:
-                name, text = f"{kind}_{fighter}", TEXT[fighter][kind_i]
-                if not redo and name in old and old[name][0] == text:
-                    lines.append((name, text, old[name][1], old[name][2]))
-                    continue
-                pcm = process(synth(text, tmp, voice))
-                lines.append((name, text, adpcm(pcm, tmp), len(pcm)))
-                print(f"  {name}: {text}  {len(pcm) / SAMPLE_RATE:.2f} 秒", flush=True)
+        todo = [(f"{kind}_{fighter}", TEXT[fighter][kind_i], voice)
+                for kind_i, kind in enumerate(KINDS) for fighter, voice in FIGHTERS]
+        todo += [(f"CALL_{name}", text, REF) for name, text in CALLS]
+        for name, text, voice in todo:
+            if not redo and name in old and old[name][0] == text:
+                lines.append((name, text, old[name][1], old[name][2]))
+                continue
+            pcm = process(synth(text, tmp, voice))
+            lines.append((name, text, adpcm(pcm, tmp), len(pcm)))
+            print(f"  {name}: {text}  {len(pcm) / SAMPLE_RATE:.2f} 秒", flush=True)
     h = ["// src/fight_lines.h —— 四个角色的专属语音(tools/gen_lines.py 生成,勿手改)。下标 = fight_char_t。",
          "// 格式同 Coopa OS 内置台词(16 kHz IMA ADPCM),用 sfx_play_line 播放。台词:", ""]
     h += [f"// {name}: {text}" for name, text, _, _ in lines]
     h += ["", "#pragma once", "", '#include "kit_lines.h"', "",
-          "extern const kit_line_t fight_lines_pick[4], fight_lines_special[4], fight_lines_super[4], fight_lines_win[4];", ""]
+          "extern const kit_line_t " + ", ".join(f"fight_lines_{k.lower()}[4]" for k in KINDS) + ";", "",
+          "enum { " + ", ".join(f"FCALL_{n}" for n, _ in CALLS) + ", FCALL_COUNT };  // 裁判",
+          "extern const kit_line_t fight_lines_call[FCALL_COUNT];", ""]
     H.write_text("\n".join(h))
     c = ["// src/fight_lines.c —— tools/gen_lines.py 生成,勿手改。", '#include "fight_lines.h"', ""]
     for name, _, data, _ in lines:
@@ -158,11 +165,15 @@ def main() -> int:
         c.append(f"const kit_line_t fight_lines_{kind.lower()}[4] = {{")
         c += [f"    {it}," for it in items]
         c.append("};")
+    c.append("const kit_line_t fight_lines_call[FCALL_COUNT] = {")
+    c += [f'    {{ fight_call_{n.lower()}, {k}, "CALL_{n}" }},' for n, _ in CALLS
+          for name, _, _, k in lines if name == f"CALL_{n}"]
+    c.append("};")
     c.append("")
     C.write_text("\n".join(c))
     total = sum(len(x[2]) for x in lines)
     longest = max(x[3] for x in lines) / SAMPLE_RATE
-    print(f"16 句,共 {total / 1024:.0f} KB(上限 {MAX_KB}),最长 {longest:.2f} 秒(上限 {MAX_SECONDS})")
+    print(f"{len(lines)} 句,共 {total / 1024:.0f} KB(上限 {MAX_KB}),最长 {longest:.2f} 秒(上限 {MAX_SECONDS})")
     for name, _, _, n in lines:
         print(f"  {name}: {n / SAMPLE_RATE:.2f} 秒")
     if total > MAX_KB * 1024 or longest > MAX_SECONDS:

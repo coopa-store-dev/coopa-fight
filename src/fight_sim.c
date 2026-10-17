@@ -327,6 +327,20 @@ static void counter(fight_sim_t *s, uint8_t who) {
     open_chain(s, g, 1, d->hitstun);
 }
 
+// 盾刚举起来就挨到:弹开。打过来的人僵住(锅盖不再飞回来),弹开的人马上能动、盾不进冷却、白拿气,
+// 连招窗口打开(下一拳接得上、▼ ● 能出大招;对方在保护里就不能大招)
+static void parry(fight_sim_t *s, uint8_t who, uint8_t m) {
+    fight_fighter_t *g = &s->f[who], *a = &s->f[!who];
+    event(s, FE_PARRY, who, m);
+    add_gauge(s, who, FIGHT_GAUGE_PARRY);
+    stun(a, FIGHT_PARRY_STUN);
+    a->hit2_left = 0;
+    enter(g, FS_IDLE, 0);
+    g->guard_cool = 0;
+    g->chain_nosuper = a->protect;
+    open_chain(s, g, 1, FIGHT_PARRY_STUN);
+}
+
 // who 的招 m 这一步打到对方。second = 奶奶锅盖飞回来的第二下(她自己这时不一定还在出招)。
 static void resolve_contact(fight_sim_t *s, uint8_t who, uint8_t m, bool second) {
     fight_fighter_t *a = &s->f[who], *d = &s->f[!who];
@@ -343,6 +357,10 @@ static void resolve_contact(fight_sim_t *s, uint8_t who, uint8_t m, bool second)
     }
     if (d->st == FS_STANCE) {
         counter(s, !who);
+        return;
+    }
+    if (d->st == FS_GUARD && !second && d->t < FIGHT_PARRY_MS) {
+        parry(s, !who, m);
         return;
     }
     if (d->st == FS_GUARD && !md->breaks_guard) {

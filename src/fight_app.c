@@ -70,6 +70,7 @@ static uint32_t s_clock, s_acc, s_quiet, s_over_ms, s_pick_deaf, s_fight_ms, s_s
 static const char *s_say;
 static uint32_t s_say_color;
 static uint8_t s_count_shown;    // 倒数上次响到几
+static int8_t s_call = -1;       // 等这句说完再报的裁判(KO:先喊倒下的人,再报「K,O!」);-1 = 没有
 // 画面上的一边:[0] 自己、[1] 对方
 static uint32_t s_flash[2], s_spark[2], s_shield[2];
 static uint16_t s_trail[2];      // 血条上刚掉的那段(千分比),慢慢往下收
@@ -122,6 +123,14 @@ static void sound(sfx_id_t id) {
     if (!s_quiet) sfx_play(id);
 }
 
+// 打中 / 重击这类一来一回的喊声:有人正在说话就不喊(不打断招式名),「啪」也照旧不放
+static void shout(const kit_line_t *line, sfx_id_t prefix) {
+    if (!s_quiet) voice(line, prefix);
+}
+
+// 挨了重的:重击、连段重击、第三拳、小招
+static bool heavy_hit(uint8_t m) { return m == FM_HEAVY || m == FM_HEAVY_LINK || m == FM_JAB3 || m == FM_SPECIAL; }
+
 static bool match_over(const fight_game_t *g) { return g->score_me >= FIGHT_WIN || g->score_peer >= FIGHT_WIN; }
 
 // 倒数显示几(3、2、1):主动方为了和被连方一起开打会多等一会儿,多的那段也显示 3
@@ -143,6 +152,7 @@ static void clear_fx(void) {
     }
     s_cut = false;
     s_say_ms = s_fight_ms = s_shake_ms = 0;
+    s_call = -1;
 }
 
 static void show_title(void) {
@@ -238,12 +248,16 @@ static void on_sim(const fight_ev_t *e) {
                 say(SPECIAL[char_of(e->who)], UK_BLUE);
                 voice(&fight_lines_special[char_of(e->who)], SFX_NONE);
             } else if (e->move == FM_HEAVY) {
-                sfx_play(SFX_WINDUP);  // 次要音效:说话时外壳自己跳过
+                shout(&fight_lines_heavy[char_of(e->who)], SFX_NONE);  // 抡起来喊一声,打到之前喊完
+            } else {
+                sfx_play(SFX_WHOOSH);  // 拳「嗖」:次要音效,说话时外壳自己跳过
             }
             break;
         case FE_HIT:
             hit_fx(!sd);
-            if (e->move != FM_SUPER) sound(SFX_HIT);
+            if (e->move == FM_SUPER) break;
+            if (heavy_hit(e->move)) shout(&fight_lines_hurt[char_of((uint8_t)!e->who)], SFX_HIT);
+            else sound(SFX_HIT);
             break;
         case FE_GUARD_BREAK:
             hit_fx(!sd);
@@ -264,6 +278,11 @@ static void on_sim(const fight_ev_t *e) {
             say(TX_COUNTER, UK_GREEN);
             sound(SFX_HIT);
             break;
+        case FE_PARRY:  // 弹开:盾一闪,「叮叮叮」+ 弹开的人喊一声(打断别的声音也要喊:这是要学会的那一下)
+            s_shield[sd] = SHIELD_MS;
+            say(TX_PARRY, UK_GREEN);
+            voice(&fight_lines_parry[char_of(e->who)], SFX_PERFECT);
+            break;
         case FE_SUPER:
             start_cut(e->who);
             s_cage[!sd] = char_of(e->who) == FC_DAD;
@@ -273,24 +292,31 @@ static void on_sim(const fight_ev_t *e) {
             }
             break;
         case FE_WAKE: s_cage[sd] = false; break;
-        case FE_KO:
+        case FE_KO:  // 倒下的人喊一声,说完裁判报「K,O!」(两人一起倒只喊一次)
             hit_fx(sd);
             s_shake_ms = SHAKE_MS;
-            sound(SFX_HIT);
+            if (s_call != FCALL_KO) {
+                voice(&fight_lines_down[char_of(e->who)], SFX_HIT);
+                s_call = FCALL_KO;
+            }
             break;
+        case FE_TIMEUP: voice(&fight_lines_call[FCALL_TIMEUP], SFX_NONE); break;
         default: break;
     }
 }
 
 static void on_event(uint8_t ev, const fight_ev_t *se) {
     switch (ev) {
-        case GE_ROUND:
+        case GE_ROUND: {  // 裁判报回合:两边各差一回合就是决胜局
             clear_fx();
             s_count_shown = 0;
+            bool last = G->score_me == FIGHT_WIN - 1 && G->score_peer == FIGHT_WIN - 1;
+            voice(&fight_lines_call[last ? FCALL_FINAL : G->round <= 1 ? FCALL_ROUND1 : FCALL_ROUND2], SFX_NONE);
             break;
+        }
         case GE_FIGHT:
             s_fight_ms = FIGHT_SHOW_MS;
-            sound(SFX_START);
+            voice(&fight_lines_call[FCALL_FIGHT], SFX_START);
             break;
         case GE_SIM: on_sim(se); break;
         case GE_ROUND_END:
@@ -299,7 +325,8 @@ static void on_event(uint8_t ev, const fight_ev_t *se) {
         case GE_OVER: {
             bool won = G->score_me >= FIGHT_WIN;
             uint8_t w = won ? G->me_char : G->peer_char;
-            voice(&fight_lines_win[w < FC_COUNT ? w : 0], SFX_GAME_OVER);  // 两张卡都放赢家的
+            s_call = -1;
+            voice(&fight_lines_win[w < FC_COUNT ? w : 0], won ? SFX_LEVEL_UP : SFX_GAME_OVER);  // 两张卡都放赢家的台词
             s_over_ms = OVER_DEAF_MS;
             bool dirty = fight_save_over(&s_save, G->match, won);
             if (s_mode == MODE_CPU && won && s_stage == STAGES) {
@@ -630,6 +657,10 @@ static void fx_frame(uint32_t dt) {
                       &s_flash[0], &s_flash[1], &s_spark[0], &s_spark[1], &s_shield[0], &s_shield[1] };
     for (size_t i = 0; i < sizeof t / sizeof t[0]; i++) uk_countdown(t[i], dt);
     for (int i = 0; i < 2; i++) track_dizzy(i);
+    if (s_call >= 0 && !s_quiet) {  // 上一句说完了:裁判接着报
+        voice(&fight_lines_call[s_call], SFX_NONE);
+        s_call = -1;
+    }
     for (int i = 0; i < 2; i++) {  // 刚掉的血慢慢收(约 0.4 秒收 100‰);新回合满血
         const fight_fighter_t *f = &G->sim.f[sim_of(i)];
         int hp = (f->hp < 0 ? 0 : f->hp) * 1000 / fight_char(f->ch)->hp, step = (int)dt / 4 + 1;
@@ -641,7 +672,7 @@ static void fx_frame(uint32_t dt) {
             s_cut = false;
             s_shake_ms = SHAKE_MS;
             hit_fx(!s_cut_side);
-            sound(SFX_HIT);
+            shout(&fight_lines_hurt[G->sim.f[sim_of(!s_cut_side)].ch % FC_COUNT], SFX_HIT);  // 挨大招的人「哎哟!」
         }
     }
     if (G->phase == GP_COUNT) {  // 倒数 3、2、1 每个数「嘀」一下

@@ -9,6 +9,8 @@
 //      挨打僵着、特写时到点的那一下白按了(规则不收);出招、收招、被挡僵着时按的规则会排着。
 //   5. 到点了:先按提前定好的一串键(● ▼ ●、● ● ●、▼ ● …);没有就按出招习惯挑下一个起手,定好后面接什么。
 //      平时就这样跟着节拍一直按,不另外等反应;反应只花在看到变化以后(1、2)。
+//   6. 弹开:看见对方起了来得及看清的招(离打到还有 PARRY_SEE 以上),按 p_parry 踩着点按 ▼(不等节拍);
+//      自己的连招窗口开了(弹开、或者碰巧举早了弹开)而手上没有定好的键,反应过来就反打(有气就 ▼ ●)。
 #include "fight_bot.h"
 
 #include <string.h>
@@ -23,9 +25,12 @@
 #define COUNTER_MS 400    // 防住拳以后反打:举盾后这么久按 ●
 #define STANCE_EARLY 100  // 对方的太极架势还剩这么久就出拳(拳打到时架势已经收了,打在收招上)
 #define SUPER_WATCH 400   // ● ▼ ● 按完后再看这么久有没有出大招(统计)
+#define PARRY_SEE 300     // 对方的招离打到还有这么久才来得及看清、踩点按 ▼
+#define PARRY_AIM (FIGHT_PARRY_MS / 2)  // 踩点:打到前这么久按 ▼
+#define PARRY_JABBER 500  // 对方最近的起手里拳占这么多(‰)以上:读得出他的节奏,连完三拳后踩下一拳的点
 
 enum { H_JAB = 0, H_HEAVY, H_GUARD, H_SPECIAL, H_KINDS };  // 对方的起手(看得见的样子)
-enum { R_NONE = 0, R_DIZZY, R_STANCE, R_BLOCKED };        // 看到了、正在反应的事(R_BLOCKED:挡住了对方)
+enum { R_NONE = 0, R_DIZZY, R_STANCE, R_BLOCKED, R_OPEN };  // 看到了、正在反应的事(R_BLOCKED:挡住了对方;R_OPEN:弹开了)
 
 typedef struct {
     uint32_t since;        // 上一下按下到现在
@@ -49,6 +54,7 @@ typedef struct {
     uint8_t opp_st, opp_move;  // 上一步看到的对方
     uint16_t opp_t;
     uint8_t habit[HABIT_N], habit_n, habit_i;
+    int16_t parry;         // 还剩多久踩点按 ▼(0 = 没打算)
 } brain_t;
 
 _Static_assert(sizeof(brain_t) <= sizeof(((fight_bot_t *)0)->pad), "brain_t must fit in fight_bot_t.pad");
@@ -56,19 +62,20 @@ _Static_assert(sizeof(brain_t) <= sizeof(((fight_bot_t *)0)->pad), "brain_t must
 static brain_t *brain(fight_bot_t *b) { return (brain_t *)(void *)b->pad; }
 
 // 真人模型(设计 §10、计划 Task 5):大人一秒 5 下、反应 0.65 秒;小孩一秒 3.5 下、反应 0.9 秒、按错多、偶尔停顿
-const fight_bot_cfg_t fight_human_adult = { 650, 150, 200, 40, 25, 25, 10, 85, 90, 3, true, true, 0, 20 };
-const fight_bot_cfg_t fight_human_kid = { 900, 250, 286, 60, 15, 20, 5, 60, 60, 12, false, true, 15, 50 };
+const fight_bot_cfg_t fight_human_adult = { 650, 150, 200, 40, 25, 25, 10, 85, 90, 3, true, true, 0, 20, 50 };
+const fight_bot_cfg_t fight_human_kid = { 900, 250, 286, 60, 15, 20, 5, 60, 60, 12, false, true, 15, 50, 20 };
 // 电脑三档:简单 ≈ 小孩再慢一点(反应 1.1 秒、一秒 3 下、少接连招和大招);普通介于两者(不读习惯);
 // 厉害 ≈ 大人但反应 0.5 秒。厉害打简单要赢 75%–95%(test_balance)
-const fight_bot_cfg_t fight_bot_easy = { 1100, 300, 333, 60, 15, 20, 5, 50, 50, 15, false, true, 20, 50 };
-const fight_bot_cfg_t fight_bot_normal = { 775, 200, 243, 50, 20, 22, 8, 72, 75, 7, false, true, 7, 35 };
-const fight_bot_cfg_t fight_bot_hard = { 500, 150, 200, 40, 25, 25, 10, 85, 90, 3, true, true, 0, 20 };
+const fight_bot_cfg_t fight_bot_easy = { 1100, 300, 333, 60, 15, 20, 5, 50, 50, 15, false, true, 20, 50, 10 };
+const fight_bot_cfg_t fight_bot_normal = { 775, 200, 243, 50, 20, 22, 8, 72, 75, 7, false, true, 7, 35, 30 };
+const fight_bot_cfg_t fight_bot_hard = { 500, 150, 200, 40, 25, 25, 10, 85, 90, 3, true, true, 0, 20, 60 };
 
 void fight_seen(const fight_sim_t *s, uint8_t me, fight_seen_t *out) {
     me &= 1;
     const fight_fighter_t *f[2] = { &s->f[me], &s->f[!me] };
     for (int i = 0; i < 2; i++) {
         const fight_fighter_t *x = f[i];
+        out->ch[i] = x->ch;
         out->st[i] = x->st;
         out->move[i] = x->move;
         out->t[i] = x->t;
@@ -158,6 +165,22 @@ static void plan_jab(fight_bot_t *b, const fight_seen_t *s) {
     }
 }
 
+// 弹开了(自己的连招窗口开着、对方僵着):有气、对方不在保护里就 ▼ ● 大招,不然 ● ● 或者 ▲
+static void plan_open(fight_bot_t *b, const fight_seen_t *s) {
+    brain_t *m = brain(b);
+    plan_clear(m);
+    m->plan_super = false;
+    if (s->gauge[0] >= FIGHT_GAUGE_BAR && !s->protect_peer && chance(b, b->cfg->p_super)) {
+        plan_add(m, FK_DOWN, 0);
+        plan_add(m, FK_OK, 0);
+    } else if (chance(b, 50)) {
+        plan_add(m, FK_OK, 0);
+        plan_add(m, FK_OK, 0);
+    } else {
+        plan_add(m, FK_UP, 0);
+    }
+}
+
 // 对方晕着:抢着补一套 ● ● ●(他在保护里,出不了大招)
 static void plan_punish(brain_t *m) {
     plan_clear(m);
@@ -222,6 +245,17 @@ static void watch(fight_bot_t *b, const fight_seen_t *s) {
             m->habit_i = (uint8_t)((m->habit_i + 1) % HABIT_N);
             if (m->habit_n < HABIT_N) m->habit_n++;
         }
+        bool seeable = st == FS_MOVE && (mv == FM_HEAVY || mv == FM_SPECIAL);
+        int32_t until = seeable ? (int32_t)fight_char(s->ch[1])->mv[mv].startup - s->t[1] : 0;  // 离打到还有多久
+        uint32_t per[H_KINDS];
+        if (st == FS_MOVE && mv == FM_JAB3 && c->reads_habits && habits(m, per) && per[H_JAB] >= PARRY_JABBER) {
+            until = s->left[1] + fight_char(s->ch[1])->mv[FM_JAB].startup;  // 老出拳的:第三拳收完马上又是一拳,踩那一拳的点
+        }
+        if (until >= PARRY_SEE && chance(b, c->p_parry)) {  // 新看到的招重新踩点
+            int32_t jit = c->react_jit / 2;
+            int32_t at = until - PARRY_AIM - jit + (int32_t)roll(b, 2u * (uint32_t)jit + 1);
+            m->parry = (int16_t)(at > 1 ? at : 1);
+        }
         if (st == FS_DIZZY) {
             m->react_kind = R_DIZZY;
             m->react = react_time(b);
@@ -281,9 +315,11 @@ int fight_bot_step(fight_bot_t *b, const fight_seen_t *s, uint32_t dt) {
         m->react_kind = R_NONE;
         m->holding = m->avoid = m->mashing = false;
         m->wait = 0;
+        m->parry = 0;
     }
     m->hp_prev[0] = s->hp[0];
     m->hp_prev[1] = s->hp[1];
+    bool open_rise = s->chain_open && !m->chain_prev;
     watch(b, s);
     count_super(b, s, dt);
     bool tap = beat(b, dt);
@@ -294,6 +330,7 @@ int fight_bot_step(fight_bot_t *b, const fight_seen_t *s, uint32_t dt) {
     }
     if (me == FS_DIZZY || me == FS_SUPER_IN) {  // 晕了(挨了大招就知道要晕):反应过来就跟着节拍狂按
         plan_clear(m);
+        m->parry = 0;
         m->holding = m->avoid = false;
         m->react_kind = R_NONE;
         if (!m->mashing) {
@@ -315,6 +352,22 @@ int fight_bot_step(fight_bot_t *b, const fight_seen_t *s, uint32_t dt) {
             return -1;  // 按着 ▼ 时别的键不按
         }
     }
+    if (m->parry > 0 && (m->parry -= (int16_t)dt) <= 0) {  // 踩点按 ▼(不等节拍,但手指快不过 gap_ms);定好的键不按了
+        if (m->since < c->gap_ms) {
+            m->parry = 1;
+        } else {
+            m->parry = 0;
+            if (me == FS_IDLE || me == FS_GUARD) {
+                plan_clear(m);
+                m->beat = c->gap_ms;  // 节拍从这一下重新数
+                return press(b, FK_DOWN, false);
+            }
+        }
+    }
+    if (open_rise && me == FS_IDLE && m->plan_i == m->plan_n && s->st[1] == FS_HITSTUN) {  // 弹开了:反应一下就反打
+        m->react_kind = R_OPEN;
+        m->react = react_time(b) / 4;  // 自己踩的点:按下去就等着反打,「弹开!」又响又闪
+    }
     if (m->react_kind && (m->react -= (int32_t)dt) <= 0) {  // 反应过来了
         uint8_t k = m->react_kind;
         m->react_kind = R_NONE;
@@ -323,6 +376,9 @@ int fight_bot_step(fight_bot_t *b, const fight_seen_t *s, uint32_t dt) {
             m->wait = 0;
         } else if (k == R_BLOCKED && s->st[1] == FS_BLOCKSTUN && m->plan_i == m->plan_n) {
             plan_jab(b, s);  // 挡住了:对方还僵着,反打(有气就 ● ▼ ●)
+            m->wait = 0;
+        } else if (k == R_OPEN && s->chain_open && m->plan_i == m->plan_n) {
+            plan_open(b, s);
             m->wait = 0;
         } else if (k == R_STANCE && s->st[1] == FS_STANCE) {
             if (m->plan_i == 0) plan_clear(m);  // 还没开始按的不按了
@@ -344,7 +400,7 @@ int fight_bot_step(fight_bot_t *b, const fight_seen_t *s, uint32_t dt) {
     // 只在节拍到点时按;僵着、特写里到点的这一下白按了
     if (!tap || me == FS_HITSTUN || me == FS_SUPER_OUT) return -1;
     if (m->plan_i < m->plan_n) return press_plan(b);
-    if (m->wait > 0) return -1;
+    if (m->wait > 0 || m->parry > 0) return -1;  // 等着踩点按 ▼:先不起新的手
     // 能动、或者自己出招 / 收招 / 被挡僵着(按了规则会排着,收完再出)
     if (me != FS_IDLE && me != FS_GUARD && me != FS_MOVE && me != FS_BLOCKSTUN && me != FS_STANCE) return -1;
     plan_opener(b, s);

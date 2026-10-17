@@ -62,7 +62,7 @@
 #include "fight_msg.h"
 #include "fight_sim.h"
 
-#define FIGHT_PROTO 2
+#define FIGHT_PROTO 3
 #define FIGHT_MSG_MAX 16
 #define FIGHT_WIN 2
 #define FIGHT_COUNT_MS 3000
