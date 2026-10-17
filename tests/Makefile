@@ -4,7 +4,7 @@ CFLAGS := -std=c11 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -fn
           -I../src -I.
 OUT := .build
 HDRS := $(wildcard ../src/*.h) $(wildcard *.h)
-TESTS := test_moves test_sim test_super test_game test_link test_bot test_local test_balance test_save test_art test_peer_glue
+TESTS := test_moves test_sim test_super test_game test_link test_bot test_local test_balance test_fair test_save test_art test_peer_glue
 
 # 语音解码测试要外壳的解码器:make -C tests COOPA_SHELL=外壳目录(没给就跳过)
 ifneq ($(COOPA_SHELL),)
@@ -58,6 +58,10 @@ $(OUT)/test_lines: test_lines.c ../src/fight_lines.c $(COOPA_SHELL)/main/kit_voi
 
 # 数值统计跑上万场:开优化、不开 sanitizer(规则在别的测试里已经在 ASan 下跑过)。场数:make -C tests BALANCE_N=1000
 $(OUT)/test_balance: test_balance.c ../src/fight_bot.c ../src/fight_sim.c ../src/fight_moves.c $(HDRS) | $(OUT)
+	$(CC) -std=c11 -O2 -Wall -Wextra -Werror -I../src -I. $(filter %.c,$^) -o $@
+
+# 联机坐哪张卡都一样:两个 fight_game_t 经假链路打几千场,同样开优化、不开 sanitizer
+$(OUT)/test_fair: test_fair.c $(GAME) ../src/fight_bot.c $(HDRS) | $(OUT)
 	$(CC) -std=c11 -O2 -Wall -Wextra -Werror -I../src -I. $(filter %.c,$^) -o $@
 
 .PHONY: all

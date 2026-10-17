@@ -108,6 +108,16 @@ static void rtt_sample(fight_game_t *g, uint32_t ms) {
     g->delay = d < FIGHT_DELAY_MIN ? FIGHT_DELAY_MIN : d > FIGHT_DELAY_MAX ? FIGHT_DELAY_MAX : d;
 }
 
+// 估计的单程(平滑来回的一半;还没量到时 FIGHT_LOCAL_DELAY)
+static uint32_t one_way(const fight_game_t *g) { return g->rtt_ok ? g->rtt / 2u : FIGHT_LOCAL_DELAY; }
+
+// 被连方的快照往前推多少:推到「被连方现在按的键到主动方时,主动方看自己」的那一刻。被连方的键在路上一个单程,
+// 主动方自己的键延后 delay:推 2 × 单程 − delay(delay 没被 30–150 限住时就是一个单程)。
+static uint8_t ahead_of(const fight_game_t *g) {
+    int32_t a = 2 * (int32_t)one_way(g) - (int32_t)g->delay;
+    return (uint8_t)(a < 0 ? 0 : a > UINT8_MAX ? UINT8_MAX : a);
+}
+
 // 被连方:排着的键合并成 'K'(没被确认的不超过 FIGHT_K_INFLIGHT 条)
 static void send_keys(fight_game_t *g) {
     while (g->kq_n && (uint8_t)(g->tx_seq - g->acked) < FIGHT_K_INFLIGHT) {
@@ -139,9 +149,10 @@ static void pump(fight_game_t *g) {
         return;
     }
     if (g->now < g->link_free) return;  // 快照只在估计链路空下来时交出去
-    // 'Q':开打时不发('Q' 和回的 'A' 各占一片,会把快照和被连方的键挤后一个来回);别的时候等链路静下来
+    // 'Q':开打时不发('Q' 和回的 'A' 各占一片,会把快照和被连方的键挤后一个来回);回合之间也不发(下一回合的 'N'
+    // 会排在它后面晚一个来回,两边开打对不齐);别的时候等链路静下来
     // FIGHT_PING_QUIET 再发,量到的来回才不带排队(估计偏小时「估计空了」并不可靠)
-    if (g->phase != GP_PLAY && !g->bad_ver && !g->ping_wait && g->now >= g->ping_next &&
+    if (g->phase != GP_PLAY && g->phase != GP_END && !g->bad_ver && !g->ping_wait && g->now >= g->ping_next &&
         g->now - g->hand_at >= FIGHT_PING_QUIET) {
         uint8_t m[2] = { 'Q', (uint8_t)(g->ping_id + 1) };
         if (!hand(g, m, sizeof m)) return;
@@ -171,7 +182,7 @@ static void send_pick(fight_game_t *g) {
 
 // 'N':round = 0 表示这场打完了
 static void send_round(fight_game_t *g, uint8_t round) {
-    uint8_t m[14] = { 'N' };
+    uint8_t m[15] = { 'N' };
     fight_put32(m + 1, g->match);
     m[5] = round;
     m[6] = g->score_me;
@@ -180,6 +191,7 @@ static void send_round(fight_game_t *g, uint8_t round) {
     m[9] = g->peer_char;
     fight_put16(m + 10, g->gauge[0]);
     fight_put16(m + 12, g->gauge[1]);
+    m[14] = ahead_of(g);
     enqueue_keep(g, m, sizeof m);
 }
 
@@ -190,6 +202,8 @@ static void clear_keys(fight_game_t *g) {
     g->predict = false;
     g->predict_left = 0;
     g->acked = g->tx_seq;
+    g->down_last = false;
+    memset(g->gone, 0, sizeof g->gone);
 }
 
 // 两边开一回合的同一段
@@ -206,9 +220,14 @@ static void begin(fight_game_t *g, uint8_t round) {
     gev(g, GE_ROUND, NULL);
 }
 
+// 主动方开一回合。被连方从收到 'N' 起倒数:主动方多等 'N' 在路上的时间——链路还忙着的那段、排在它前面的
+// 每条各占一个来回(停等)、再一个单程——两边一起开打。
 static void start_round(fight_game_t *g, uint8_t round) {
+    uint32_t piece = g->rtt_ok ? g->rtt : busy_base(g);
+    uint32_t wait = (g->link_free > g->now ? g->link_free - g->now : 0) + (uint32_t)(g->out_n + g->keep_n) * piece;
     send_round(g, round);
     begin(g, round);
+    g->phase_ms += wait + one_way(g);
 }
 
 static void finish(fight_game_t *g) {
@@ -376,6 +395,7 @@ static void on_ack(fight_game_t *g, const uint8_t *m, size_t n) {
     if (!g->initiator || n < 2 || !g->ping_wait || m[1] != g->ping_id) return;
     g->ping_wait = false;
     rtt_sample(g, g->now - g->ping_at);
+    if (g->hand_at == g->ping_at && g->link_free > g->now) g->link_free = g->now;  // 'Q' 是最后交出去的一片:回答到了,链路空了
 }
 
 // ---- 被连方:照快照画 ----
@@ -404,17 +424,69 @@ static void send_mash(fight_game_t *g) {
     g->mash_cool = FIGHT_MASH_MSG_MS;
 }
 
-// 快照前后比一比,给画面出事件(打中、挡住的特效、出招、晕、醒);大招、KO、时间到由 'E' 出
+// 快照前后比一比,给画面出事件(出招、打中、砸开防御、太极接住、挡住的特效、晕、醒);大招、KO、时间到由 'E' 出。
+// 爷爷的太极:摆架势算出招(FE_START 小招),架势收招(FS_STANCE → FS_MOVE 小招)不算;
+// 架势里的爷爷不再摆了、对方掉了血 = 接住(FE_COUNTER);举着盾掉血、打的那招砸得开盾 = 砸开防御。
 static void diff_events(fight_game_t *g, const fight_fighter_t *old) {
     for (uint8_t i = 0; i < 2; i++) {
-        const fight_fighter_t *o = &old[i], *f = &g->sim.f[i];
-        if (f->st == FS_MOVE && (o->st != FS_MOVE || o->move != f->move || f->t + 200 < o->t))
+        const fight_fighter_t *o = &old[i], *f = &g->sim.f[i], *po = &old[!i], *p = &g->sim.f[!i];
+        bool stance_end = o->st == FS_STANCE && f->st == FS_MOVE && f->move == FM_SPECIAL;
+        if ((f->st == FS_MOVE && !stance_end && (o->st != FS_MOVE || o->move != f->move || f->t + 200 < o->t)) ||
+            (f->st == FS_STANCE && o->st != FS_STANCE))
             sim_gev(g, FE_START, i, f->move);
-        if (f->hp < o->hp) sim_gev(g, FE_HIT, !i, g->sim.f[!i].move);
+        if (f->hp < o->hp) {
+            bool countered = po->st == FS_STANCE && p->st != FS_STANCE && !(p->st == FS_MOVE && p->move == FM_SPECIAL);
+            if (countered) sim_gev(g, FE_COUNTER, !i, FM_SPECIAL);
+            else if (o->st == FS_GUARD && fight_char(p->ch)->mv[p->move].breaks_guard) sim_gev(g, FE_GUARD_BREAK, !i, p->move);
+            else sim_gev(g, FE_HIT, !i, p->move);
+        }
         if (f->st == FS_BLOCKSTUN && o->st != FS_BLOCKSTUN) sim_gev(g, FE_BLOCK, i, f->move);
         if (f->st == FS_DIZZY && o->st != FS_DIZZY) sim_gev(g, FE_DIZZY, i, 0);
         if (o->st == FS_DIZZY && f->st != FS_DIZZY) sim_gev(g, FE_WAKE, i, 0);
     }
+}
+
+static bool in_super(uint8_t st) { return st == FS_SUPER_IN || st == FS_SUPER_OUT; }
+
+// 有事件的状态(出招、被挡僵直、晕、大招特写):这边结束掉以后,晚到的快照别再画回来(会重出一次事件、重新定住)。
+// 盾、挨打僵直不算:主动方会把它们拉长(长按撑盾、连招的下一下),快照说还在就还在。
+static bool evented(uint8_t st) { return st == FS_MOVE || st == FS_BLOCKSTUN || st == FS_DIZZY || in_super(st); }
+
+// 这个状态开始了多久(特写时 t 不走:按冻结过了多久算)
+static uint16_t elapsed(uint8_t st, uint16_t t, uint16_t freeze) {
+    return in_super(st) ? (uint16_t)(FIGHT_SUPER_FREEZE - (freeze < FIGHT_SUPER_FREEZE ? freeze : FIGHT_SUPER_FREEZE)) : t;
+}
+
+// 被连方:到时间的出招、盾、僵直,晕减到 0(只按时间减,自己狂按的主动方算了才知道),特写冻结完(放招的人能动、
+// 挨的人开始晕),这边就结束、不等快照;结束掉的有事件的状态记下开始时刻。返回结束掉的状态(FS_IDLE = 没有)
+static uint8_t expire(fight_game_t *g, uint8_t i) {
+    fight_fighter_t *f = &g->sim.f[i];
+    uint8_t st = f->st;
+    bool due = st == FS_DIZZY  ? !f->mash_left
+               : in_super(st) ? !g->sim.freeze
+                              : (st == FS_MOVE || st == FS_GUARD || st == FS_HITSTUN || st == FS_BLOCKSTUN) && f->t >= f->dur;
+    if (!due) return FS_IDLE;
+    if (evented(st)) {
+        g->gone[i].st = st;
+        g->gone[i].move = f->move;
+        g->gone[i].at = g->now - elapsed(st, f->t, 0);
+    }
+    f->t = 0;
+    if (st == FS_SUPER_IN) {
+        f->st = FS_DIZZY;
+        f->dur = f->mash_left = FIGHT_DIZZY_SUPER;
+    } else {
+        f->st = FS_IDLE;
+        f->dur = 0;
+    }
+    return st;
+}
+
+// 快照里的这一下是不是这边已经结束掉的那一下(状态一样、出招的话招也一样,开始时刻差 FIGHT_GONE_TOL 以内)
+static bool is_gone(const fight_game_t *g, uint8_t i, uint8_t st, uint8_t move, uint16_t since) {
+    int32_t d = (int32_t)(g->now - since - g->gone[i].at);
+    return evented(st) && g->gone[i].st == st && (st != FS_MOVE || g->gone[i].move == move) && d >= -FIGHT_GONE_TOL &&
+           d <= FIGHT_GONE_TOL;
 }
 
 static void apply_snap(fight_game_t *g, const fight_snap_t *s) {
@@ -422,23 +494,31 @@ static void apply_snap(fight_game_t *g, const fight_snap_t *s) {
     // 自己先画的招:快照还没算到那个键(没发出去,或者 ack 还没到)、也没出别的事,就先留着画的样子
     bool keep = g->predict && (g->predict_left || (int8_t)(s->ack - g->predict_seq) < 0);
     g->sim.freeze = 0;
+    bool set[2];
     for (uint8_t i = 0; i < 2; i++) {
         fight_fighter_t *f = &g->sim.f[i];
         const fight_snap_one_t *n = &s->f[i];
-        if (!(i == g->me && keep && (n->st == FS_IDLE || n->st == FS_GUARD))) {
+        // 快照旧了约一个单程:有时长的状态往前推 ahead(特写时主动方的 t 不走,只推冻结还剩多少)
+        uint16_t a = n->st != FS_IDLE && n->st != FS_KO ? g->ahead : 0;
+        uint16_t t = (uint16_t)(n->t + (in_super(n->st) ? 0 : a)), left = n->left > a ? (uint16_t)(n->left - a) : 0;
+        bool kept = i == g->me && keep && (n->st == FS_IDLE || n->st == FS_GUARD);
+        set[i] = !kept && !is_gone(g, i, n->st, n->move, elapsed(n->st, t, left));
+        if (set[i]) {
             f->st = n->st;
             f->move = n->move;
-            f->t = n->t;
-            f->dur = (uint16_t)(n->t + n->left);
-            if (i == g->me) g->predict = false;
+            f->t = t;
+            f->dur = (uint16_t)(t + left);
+            f->mash_left = n->st == FS_DIZZY ? left : 0;
+            if (n->st == FS_SUPER_OUT) g->sim.freeze = left;
         }
+        if (i == g->me && !kept) g->predict = false;
         f->chain = n->chain;
         f->protect = n->protect;
         f->hp = n->hp;
         f->gauge = n->gauge;
-        f->mash_left = n->st == FS_DIZZY ? n->left : 0;
-        if (n->st == FS_SUPER_OUT) g->sim.freeze = n->left;
     }
+    for (uint8_t i = 0; i < 2; i++)
+        if (set[i]) expire(g, i);
     g->sim.clock = s->clock;
     diff_events(g, old);
 }
@@ -461,12 +541,12 @@ static void on_event(fight_game_t *g, const uint8_t *m, size_t n) {
     bool ok = kind == FE_TIMEUP ? who <= 1 || who == FIGHT_DRAW : (kind == FE_SUPER || kind == FE_KO) && who <= 1;
     if (!ok || move >= FM_COUNT || !playing(g)) return;
     fight_sim_t *s = &g->sim;
-    if (kind == FE_SUPER) {  // 特写:两边定住,冻结完由快照接着画
+    if (kind == FE_SUPER) {  // 特写:两边定住(晚到了约一个单程,冻结少等 ahead),冻结完这边就接着画
         s->f[who].st = FS_SUPER_OUT;
         s->f[who].move = FM_SUPER;
         s->f[!who].st = FS_SUPER_IN;
         for (int i = 0; i < 2; i++) s->f[i].t = 0;
-        s->freeze = FIGHT_SUPER_FREEZE;
+        s->freeze = (uint16_t)(FIGHT_SUPER_FREEZE - g->ahead);
         if (who == g->me) g->predict = false;
     } else if (kind == FE_KO) {
         s->f[who].st = FS_KO;
@@ -477,38 +557,60 @@ static void on_event(fight_game_t *g, const uint8_t *m, size_t n) {
     sim_gev(g, kind, who, move);
 }
 
-// 被连方这一步:画面上的时间接着走(下一条快照来了以快照为准);狂按的数攒着发
+static uint16_t dec(uint16_t v) { return v > FIGHT_STEP ? (uint16_t)(v - FIGHT_STEP) : 0; }
+
+// 被连方这一步:画面上的时间接着走,到时间的出招、盾、僵直结束,晕接着减(下一条快照来了以快照为准);
+// 自己的小招冷却照规则估(出完小招才开始减),先画小招用;狂按的数攒着发
 static void view_step(fight_game_t *g) {
     fight_sim_t *s = &g->sim;
     if (s->freeze) {
-        s->freeze = s->freeze > FIGHT_STEP ? (uint16_t)(s->freeze - FIGHT_STEP) : 0;
+        s->freeze = dec(s->freeze);
+        if (!s->freeze)
+            for (uint8_t i = 0; i < 2; i++) expire(g, i);
     } else {
         if (s->clock < FIGHT_ROUND_MS) s->clock += FIGHT_STEP;
-        for (int i = 0; i < 2; i++)
-            if (s->f[i].t <= UINT16_MAX - FIGHT_STEP) s->f[i].t += FIGHT_STEP;
+        for (uint8_t i = 0; i < 2; i++) {
+            fight_fighter_t *f = &s->f[i];
+            if (f->t <= UINT16_MAX - FIGHT_STEP) f->t += FIGHT_STEP;
+            if (f->st == FS_DIZZY) f->mash_left = dec(f->mash_left);
+            if (expire(g, i) == FS_DIZZY) sim_gev(g, FE_WAKE, i, 0);
+        }
+        fight_fighter_t *me = &s->f[g->me];
+        bool special = me->st == FS_STANCE || (me->st == FS_MOVE && me->move == FM_SPECIAL);
+        me->special_cool = special ? FIGHT_SPECIAL_COOL : dec(me->special_cool);
     }
     g->mash_cool = g->mash_cool > FIGHT_STEP ? (uint16_t)(g->mash_cool - FIGHT_STEP) : 0;
     if (mashing(g)) send_mash(g);
     else if (s->f[g->me].st != FS_SUPER_IN) g->mash_n = g->mash_sent = 0;  // 醒了:下次晕从 0 数
 }
 
-// 被连方按下自己的键:先画成出招 / 举盾的样子(只画,规则在主动方)
+// 被连方按下自己的键:先画成出招 / 举盾 / 小招的样子(只画,规则在主动方)。▼ ▲ 照规则(fight_sim 的 ▼ 前缀):
+// 上一个键是 ▼、在 FIGHT_PREFIX_MS 内或者盾还举着 → 小招(爷爷摆太极架势);小招冷却里 ▲ 不出。长按撑着盾。
 static void predict(fight_game_t *g, uint8_t key) {
     fight_fighter_t *f = &g->sim.f[g->me];
-    if (g->sim.freeze || (f->st != FS_IDLE && f->st != FS_GUARD) || key == FK_DOWN_LONG) return;
+    bool prefix = key == FK_UP && g->down_last && (g->now - g->down_at <= FIGHT_PREFIX_MS || f->st == FS_GUARD);
+    if (key != FK_DOWN_LONG) g->down_last = key == FK_DOWN;
+    if (key == FK_DOWN) g->down_at = g->now;
+    if (g->sim.freeze || (f->st != FS_IDLE && f->st != FS_GUARD)) return;
     const fight_char_def_t *c = fight_char(f->ch);
-    if (key == FK_DOWN) {
+    if (key == FK_DOWN_LONG) {
+        if (f->st != FS_GUARD) return;
+        f->dur = c->guard_long_ms;
+    } else if (key == FK_DOWN) {
         if (f->st == FS_GUARD) return;
         f->st = FS_GUARD;
+        f->t = 0;
         f->dur = c->guard_ms;
+    } else if (prefix && f->special_cool) {
+        return;
     } else {
-        f->st = FS_MOVE;
-        f->move = key == FK_UP ? FM_HEAVY : FM_JAB;
+        f->move = prefix ? FM_SPECIAL : key == FK_UP ? FM_HEAVY : FM_JAB;
         const fight_move_def_t *d = &c->mv[f->move];
-        f->dur = (uint16_t)(d->startup + d->active + d->recovery);
+        f->st = prefix && f->ch == FC_GRANDPA ? FS_STANCE : FS_MOVE;
+        f->t = 0;
+        f->dur = f->st == FS_STANCE ? FIGHT_STANCE_MS : (uint16_t)(d->startup + d->active + d->recovery);
         sim_gev(g, FE_START, g->me, f->move);
     }
-    f->t = 0;
     g->predict = true;
     g->predict_left = g->kq_n;
 }
@@ -545,7 +647,7 @@ static void on_pick(fight_game_t *g, const uint8_t *m, size_t n) {
 }
 
 static void on_round(fight_game_t *g, const uint8_t *m, size_t n) {
-    if (n < 14 || g->initiator) return;
+    if (n < 15 || g->initiator) return;
     uint32_t match = fight_get32(m + 1);
     uint16_t g0 = fight_get16(m + 10), g1 = fight_get16(m + 12);
     if (!match || m[6] > FIGHT_WIN || m[7] > FIGHT_WIN || m[8] >= FC_COUNT || m[9] >= FC_COUNT) return;
@@ -559,6 +661,7 @@ static void on_round(fight_game_t *g, const uint8_t *m, size_t n) {
     g->score_peer = m[6];
     g->gauge[0] = g0;
     g->gauge[1] = g1;
+    g->ahead = m[14];
     if (m[5]) {
         begin(g, m[5]);
     } else if (over(g)) {

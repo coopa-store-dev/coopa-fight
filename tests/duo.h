@@ -42,7 +42,7 @@ void duo_drop(void);
 void duo_delay(uint32_t ms, uint32_t jitter);  // 两个方向都设
 void duo_stall(pipe_t *p);                     // 这个方向这一刻起 DUO_STALL_MS 不送
 void duo_pick(uint8_t a, uint8_t b);           // 两边在选人页确定(a 是主动方)并送达
-void duo_begin(void);                          // init + 连上 + 选人(库巴 对 爸爸):两边进倒数
+void duo_begin(void);                          // init + 连上 + 选人页上量一次来回 + 选人(库巴 对 爸爸):两边进倒数
 void flow(void);                               // 把到了时间的消息送到(没延迟时一直送到没有为止)
 void duo_step(void);                           // 10 ms:两边各 tick 一次,再 flow
 void run(uint32_t ms);

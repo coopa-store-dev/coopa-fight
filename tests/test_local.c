@@ -34,6 +34,8 @@ static void begin(uint8_t me, uint8_t cpu) {
     fight_local_init(&L, rnd);
     fight_local_flow(&L);
     CHECK(L.me.phase == GP_PICK && L.cpu.phase == GP_PICK && L.me.match == L.cpu.match);
+    for (int t = 0; t < FIGHT_PING_QUIET + 10; t += FIGHT_STEP) tick(FIGHT_STEP);   // 选人页上量一次来回(选人页前 0.4 秒不收 ●)
+    CHECK(L.me.rtt_ok && L.me.rtt == 0);
     CHECK(fight_game_pick(&L.me, me) && fight_game_pick(&L.cpu, cpu));
     fight_local_flow(&L);
     CHECK(L.me.phase == GP_COUNT && L.cpu.phase == GP_COUNT);

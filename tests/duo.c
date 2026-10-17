@@ -138,6 +138,7 @@ void duo_begin(void) {
     duo_init();
     duo_connect();
     flow();
+    run(FIGHT_PING_QUIET + 10);   // 在选人页上量一次来回(真人选人总要一会儿);主动方按它对齐开打
     duo_pick(FC_KID, FC_DAD);
     assert(D.a.phase == GP_COUNT && D.b.phase == GP_COUNT);
 }

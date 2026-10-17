@@ -1,9 +1,11 @@
 // tests/test_link.c —— 联机:快照跟得上主动方、被连方的键晚到 / 卡一下 / 排满、断线续上、被连方重启、
-// 被连方狂按解晕、被连方的 ● ▼ ● 卡一下照样是大招、两边出大招一样难、快照不堆积。
+// 被连方狂按解晕、被连方的 ● ▼ ● 卡一下照样是大招、两边出大招一样难、快照不堆积;
+// 被连方的画面跟上主动方的现在(僵直、特写、晕按时结束,不重出事件)、被连方卡上的小招 / 太极 / 破防 / 接住、两边一起开打。
 #include "duo.h"
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #define CHECK(c) do { if (!(c)) { \
     printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #c); exit(1); } } while (0)
@@ -489,6 +491,239 @@ static void test_burst_reanchor(void) {
     CHECK(starts == 12 && worst <= 150);
 }
 
+
+// ---- 被连方的画面跟上主动方的现在(坐哪张卡都一样)----
+
+static int EVS[2][FE_TIMEUP + 1][2][FM_COUNT];   // [哪张卡][种类][who][招]:跑的时候收到的 GE_SIM
+
+static void count_events(void) {
+    for (int c = 0; c < 2; c++) {
+        uint8_t e;
+        fight_ev_t se;
+        while (fight_game_event(side(c), &e, &se))
+            if (e == GE_SIM && se.kind <= FE_TIMEUP && se.who < 2 && se.move < FM_COUNT) EVS[c][se.kind][se.who][se.move]++;
+    }
+}
+
+static void clear_events(void) {
+    drain_events();
+    memset(EVS, 0, sizeof EVS);
+}
+
+static void run_count(uint32_t ms) {
+    for (uint32_t t = 0; t < ms; t += 10) {
+        duo_step();
+        count_events();
+    }
+}
+
+// 这张卡上 who 的某种事件一共几条(所有招加起来)
+static int evs(int card, uint8_t kind, int who) {
+    int n = 0;
+    for (int m = 0; m < FM_COUNT; m++) n += EVS[card][kind][who][m];
+    return n;
+}
+
+// 跑到主动方的 f[who] 和被连方画面上的 f[who] 都进过 st 又离开(st 在 5 秒内开始);返回离开的时刻差(被连方 − 主动方)
+static int32_t view_lag(int who, uint8_t st) {
+    uint32_t real = 0, seen = 0;
+    bool in_r = false, in_s = false;
+    for (int t = 0; !real || !seen; t += 10) {
+        CHECK(t < 5000);
+        if (D.a.sim.f[who].st == st) in_r = true;
+        else if (in_r && !real) real = D.now;
+        if (D.b.sim.f[who].st == st) in_s = true;
+        else if (in_s && !seen) seen = D.now;
+        if (real && seen) break;
+        duo_step();
+        count_events();
+    }
+    return (int32_t)seen - (int32_t)real;
+}
+
+// 被连方自己的挨打僵直、被挡僵直、大招特写、晕(不按,自己醒)在这张卡上结束的时刻和主动方的规则一样(差一步以内),
+// 不等下一条快照;放大招的人也同时能动
+static void test_view_catches_up(void) {
+    test_seed(71);
+    begin_as(FC_KID, FC_DAD, 70, 0);
+    run(2500);   // 量过来回
+    CHECK(D.a.rtt_ok && D.b.ahead >= 60 && D.b.ahead <= 80);
+    press(0, FK_OK);
+    int32_t lag = view_lag(1, FS_HITSTUN);
+    printf("test_view_catches_up: hitstun ends %d ms after the host", (int)lag);
+    CHECK(lag >= -20 && lag <= 20);
+    run(1000);
+    press(0, FK_DOWN);   // 主动方举盾(70 ms 后生效),被连方的拳打在盾上
+    run(100);
+    press(1, FK_OK);
+    lag = view_lag(1, FS_BLOCKSTUN);
+    printf(", blockstun %d", (int)lag);
+    CHECK(lag >= -20 && lag <= 20);
+    run(1500);
+    D.a.sim.f[0].gauge = FIGHT_GAUGE_BAR;
+    press(0, FK_OK);
+    run(100);
+    press(0, FK_DOWN);
+    run(100);
+    press(0, FK_OK);
+    lag = view_lag(1, FS_SUPER_IN);
+    printf(", super freeze %d", (int)lag);
+    CHECK(lag >= -20 && lag <= 20);
+    CHECK(D.b.sim.f[1].st == FS_DIZZY && D.b.sim.f[0].st == FS_IDLE);
+    lag = view_lag(1, FS_DIZZY);
+    printf(", dizzy %d ms\n", (int)lag);
+    CHECK(lag >= -20 && lag <= 20);
+}
+
+// 这边已经结束掉的出招、被挡僵直,晚到的快照(抖动)不再画回来:被连方卡上的出招、挡住事件和主动方的一样多
+static void test_view_no_double_events(void) {
+    test_seed(72);
+    begin_as(FC_KID, FC_KID, 70, 23);
+    run(2500);
+    clear_events();
+    for (int i = 0; i < 9; i++) {   // 一回合 60 秒里打得完
+        press(1, FK_OK);
+        run_count(1200);
+        press(0, FK_OK);
+        run_count(1200);
+        press(1, FK_DOWN);
+        run_count(100);
+        press(1, FK_UP);
+        run_count(1600);
+        press(0, FK_DOWN);   // 主动方举盾,被连方的拳被挡
+        run_count(100);
+        press(1, FK_OK);
+        run_count(1600);
+    }
+    for (int who = 0; who < 2; who++)
+        for (int m = 0; m < FM_COUNT; m++) CHECK(EVS[1][FE_START][who][m] == EVS[0][FE_START][who][m]);
+    CHECK(D.a.round == 1 && EVS[0][FE_START][1][FM_SPECIAL] == 9 && EVS[0][FE_START][1][FM_JAB] == 18);
+    CHECK(evs(1, FE_BLOCK, 1) == evs(0, FE_BLOCK, 1) && evs(0, FE_BLOCK, 1) == 9);
+    CHECK(evs(1, FE_WAKE, 0) == 0 && evs(1, FE_WAKE, 1) == 0);
+}
+
+// ---- 被连方卡上的小招、太极、破防、接住 ----
+
+static void test_passive_feedback(void) {
+    // ▼ ▲(隔 100 ms,或者按着 ▼ 400 ms 再按 ▲):这边先画的就是小招,不先抡重击
+    for (int k = 0; k < 2; k++) {
+        test_seed(73);
+        begin_as(FC_KID, FC_DAD, 35, 0);
+        run(2500);
+        clear_events();
+        press(1, FK_DOWN);
+        run_count(k ? 400 : 100);
+        press(1, FK_UP);
+        count_events();
+        CHECK(EVS[1][FE_START][1][FM_SPECIAL] == 1 && D.b.sim.f[1].st == FS_MOVE && D.b.sim.f[1].move == FM_SPECIAL);
+        run_count(1500);
+        CHECK(EVS[1][FE_START][1][FM_HEAVY] == 0 && EVS[1][FE_START][1][FM_SPECIAL] == 1);
+        CHECK(EVS[0][FE_START][1][FM_SPECIAL] == 1);
+        // 小招冷却里再 ▼ ▲:主动方不出,这边也不画
+        press(1, FK_DOWN);
+        run_count(100);
+        press(1, FK_UP);
+        run_count(1500);
+        CHECK(EVS[0][FE_START][1][FM_SPECIAL] == 1 && EVS[1][FE_START][1][FM_SPECIAL] == 1);
+        CHECK(EVS[1][FE_START][1][FM_HEAVY] == 0 && EVS[0][FE_START][1][FM_HEAVY] == 0);
+    }
+    // 爷爷的太极推手:按下就出招式名(摆架势),没人打过来收招时不再出一次;对面卡上看到的也一样
+    for (int me = 0; me < 2; me++) {
+        test_seed(74);
+        begin_as(me ? FC_KID : FC_GRANDPA, me ? FC_GRANDPA : FC_KID, 35, 0);
+        run(2500);
+        clear_events();
+        press(me, FK_DOWN);
+        run_count(100);
+        press(me, FK_UP);
+        if (me) {
+            count_events();
+            CHECK(EVS[1][FE_START][1][FM_SPECIAL] == 1 && D.b.sim.f[1].st == FS_STANCE);
+        }
+        run_count(300);   // 架势还摆着:两张卡都已经出了招式名
+        CHECK(EVS[0][FE_START][me][FM_SPECIAL] == 1 && EVS[1][FE_START][me][FM_SPECIAL] == 1);
+        CHECK(D.b.sim.f[me].st == FS_STANCE);
+        run_count(2200);
+        CHECK(EVS[0][FE_START][me][FM_SPECIAL] == 1 && EVS[1][FE_START][me][FM_SPECIAL] == 1);
+        // 接住:对面一拳打进架势
+        press(me, FK_DOWN);
+        run_count(100);
+        press(me, FK_UP);
+        run_count(100);
+        press(!me, FK_OK);
+        run_count(1500);
+        CHECK(evs(0, FE_COUNTER, me) == 1 && evs(1, FE_COUNTER, me) == 1);
+        CHECK(evs(1, FE_HIT, !me) == 0 && evs(0, FE_HIT, !me) == 0);
+    }
+    // 破防:爸爸的重击砸在举着的盾上,两张卡都是「破防！」不是普通的打中
+    for (int me = 0; me < 2; me++) {
+        test_seed(75);
+        begin_as(me ? FC_KID : FC_DAD, me ? FC_DAD : FC_KID, 35, 0);
+        run(2500);
+        clear_events();
+        press(!me, FK_DOWN);   // 按着 ▼:0.5 秒来长按,盾撑到重击砸下来
+        run_count(100);
+        press(me, FK_UP);
+        run_count(400);
+        press(!me, FK_DOWN_LONG);
+        run_count(1200);
+        CHECK(evs(0, FE_GUARD_BREAK, me) == 1 && evs(1, FE_GUARD_BREAK, me) == 1);
+        CHECK(evs(0, FE_HIT, me) == 0 && evs(1, FE_HIT, me) == 0);
+    }
+}
+
+// ---- 两边一起开打 ----
+
+// 记下两张卡各自「开打」的时刻;跑到两边都开打了
+static int32_t fight_gap(void) {
+    uint32_t at[2] = { 0, 0 };
+    for (int t = 0; !at[0] || !at[1]; t += 10) {
+        CHECK(t < FIGHT_NEXT_MS + FIGHT_COUNT_MS + 2000);
+        CHECK(!(D.a.phase == GP_END && D.a.ping_wait));   // 回合之间不 ping
+        duo_step();
+        for (int c = 0; c < 2; c++) {
+            uint8_t e;
+            while (fight_game_event(side(c), &e, NULL))
+                if (e == GE_FIGHT && !at[c]) at[c] = D.now;
+        }
+    }
+    return (int32_t)at[1] - (int32_t)at[0];
+}
+
+static void test_fight_aligned(void) {
+    for (int busy = 0; busy < 2; busy++) {
+        test_seed(76);
+        duo_init();
+        duo_delay(70, 0);
+        duo_connect();
+        run(1000);   // 选人页上量过来回
+        CHECK(D.a.phase == GP_PICK && D.a.rtt_ok);
+        CHECK(fight_game_pick(&D.b, FC_KID));
+        run(200);
+        if (busy)   // 'Q' 正在路上时开回合:'N' 排在它后面
+            for (int t = 0; !D.a.ping_wait; t += 10) {
+                CHECK(t < 3000);
+                duo_step();
+            }
+        drain_events();
+        CHECK(fight_game_pick(&D.a, FC_DAD));
+        flow();
+        int32_t gap = fight_gap();
+        printf("test_fight_aligned: round 1%s passive starts %d ms after the host", busy ? " (ping in flight)" : "", (int)gap);
+        CHECK(gap >= -20 && gap <= 30);
+        D.a.sim.f[1].hp = 1;
+        press(0, FK_OK);
+        for (int t = 0; D.a.phase == GP_PLAY; t += 10) {
+            CHECK(t < 2000);
+            duo_step();
+        }
+        drain_events();
+        gap = fight_gap();
+        printf(", round 2 %d ms\n", (int)gap);
+        CHECK(D.a.round == 2 && gap >= -20 && gap <= 20);
+    }
+}
+
 int main(void) {
     test_mirror();
     test_predict();
@@ -503,6 +738,10 @@ int main(void) {
     test_snapshot_no_backlog();
     test_slowdown();
     test_burst_reanchor();
+    test_view_catches_up();
+    test_view_no_double_events();
+    test_passive_feedback();
+    test_fight_aligned();
     printf("test_link: PASS\n");
     return 0;
 }

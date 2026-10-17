@@ -120,6 +120,12 @@ static void sound(sfx_id_t id) {
 
 static bool match_over(const fight_game_t *g) { return g->score_me >= FIGHT_WIN || g->score_peer >= FIGHT_WIN; }
 
+// 倒数显示几(3、2、1):主动方为了和被连方一起开打会多等一会儿,多的那段也显示 3
+static unsigned count_digit(void) {
+    unsigned n = (unsigned)(G->phase_ms / 1000 + 1);
+    return n > FIGHT_COUNT_MS / 1000 ? FIGHT_COUNT_MS / 1000 : n;
+}
+
 // 画面的一边(0 自己、1 对方)在 sim.f[] 里的下标,和反过来
 static uint8_t sim_of(int side) { return (uint8_t)(side ? !G->me : G->me); }
 static int side_of(uint8_t who) { return who == G->me ? 0 : 1; }
@@ -204,10 +210,11 @@ static void pick(uint8_t f) {
     if (s_mode == MODE_CPU && s_stage == 1 && !s_auto) make_order(f);
 }
 
-// 大招特写:放招的人的头像和招式名,喊他自己的招式语音(不点对方是谁)
+// 大招特写:放招的人的头像和招式名,喊他自己的招式语音(不点对方是谁)。
+// 被连方收到大招晚了约一个单程(冻结少等 ahead,见 fight_game.h):特写也从 ahead 开始,和冻结一起结束
 static void start_cut(uint8_t who) {
     s_cut = true;
-    s_cut_ms = 0;
+    s_cut_ms = G->initiator ? 0 : G->ahead;
     s_cut_char = char_of(who);
     s_cut_side = (uint8_t)side_of(who);
     voice(&fight_lines_super[s_cut_char], SFX_CHAIN);
@@ -507,7 +514,7 @@ static void show_game(void) {
     v->shake = (int8_t)(s_shake_ms ? ((s_clock / 40) & 1 ? 4 : -4) : 0);
     switch (g->phase) {
         case GP_COUNT:
-            snprintf(v->big, sizeof(v->big), "%u", (unsigned)(g->phase_ms / 1000 + 1));
+            snprintf(v->big, sizeof(v->big), "%u", count_digit());
             snprintf(v->sub, sizeof(v->sub), TX_ROUND, (unsigned)g->round);
             if (s_mode == MODE_CPU) snprintf(v->hint, sizeof(v->hint), TX_STAGE, (unsigned)s_stage);
             else snprintf(v->hint, sizeof(v->hint), "%s", TX_KEYS);
@@ -630,7 +637,7 @@ static void fx_frame(uint32_t dt) {
         }
     }
     if (G->phase == GP_COUNT) {  // 倒数 3、2、1 每个数「嘀」一下
-        uint8_t n = (uint8_t)(G->phase_ms / 1000 + 1);
+        uint8_t n = (uint8_t)count_digit();
         if (n != s_count_shown) {
             s_count_shown = n;
             sound(SFX_TICK);
