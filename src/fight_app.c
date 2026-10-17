@@ -48,6 +48,7 @@ static const char *const SUPER[FC_COUNT] = { TX_SU_KID, TX_SU_DAD, TX_SU_GRANNY,
 static const fight_bot_cfg_t *const LEVEL[STAGES] = { &fight_bot_easy, &fight_bot_normal, &fight_bot_hard };
 
 static fight_save_t s_save;
+static bool s_dirty;             // 存档里有还没写下去的(大招次数):回合打完、一场打完、回首页时写,不在特写那一刻写
 static fight_game_t s_link;      // 联机时的这一边
 static fight_local_t s_loc;      // 和电脑打:me(主动方)+ cpu
 static fight_bot_t s_bot;        // 电脑的脑子
@@ -86,7 +87,10 @@ static bool link_send(void *ctx, const void *m, size_t n) {
 
 static uint32_t rnd(void) { return esp_random(); }
 
-static void store(void) { kit_sv_blob_store(FIGHT_NS, FIGHT_KEY, &s_save, sizeof(s_save)); }
+static void store(void) {
+    kit_sv_blob_store(FIGHT_NS, FIGHT_KEY, &s_save, sizeof(s_save));
+    s_dirty = false;
+}
 
 // 内容没变就不重画(key 里放着画这一页用到的所有东西)
 static bool changed(const char *key) {
@@ -149,6 +153,7 @@ static void show_title(void) {
 }
 
 static void to_title(void) {
+    if (s_dirty) store();
     if (s_mode == MODE_LINK) kit_link_stop();
     fight_game_lost(&s_link);
     s_up = false;
@@ -262,9 +267,9 @@ static void on_sim(const fight_ev_t *e) {
         case FE_SUPER:
             start_cut(e->who);
             s_cage[!sd] = char_of(e->who) == FC_DAD;
-            if (sd == 0) {
+            if (sd == 0) {  // 里程碑「第一次打出大招」读的是内存里的;存档等回合打完再写
                 s_save.supers++;
-                store();
+                s_dirty = true;
             }
             break;
         case FE_WAKE: s_cage[sd] = false; break;
@@ -288,6 +293,9 @@ static void on_event(uint8_t ev, const fight_ev_t *se) {
             sound(SFX_START);
             break;
         case GE_SIM: on_sim(se); break;
+        case GE_ROUND_END:
+            if (s_dirty) store();
+            break;
         case GE_OVER: {
             bool won = G->score_me >= FIGHT_WIN;
             uint8_t w = won ? G->me_char : G->peer_char;
@@ -298,7 +306,7 @@ static void on_event(uint8_t ev, const fight_ev_t *se) {
                 s_cleared = true;
                 dirty |= fight_save_set_crown(&s_save, G->me_char);
             }
-            if (dirty) store();
+            if (dirty || s_dirty) store();
             break;
         }
         case GE_PICK:

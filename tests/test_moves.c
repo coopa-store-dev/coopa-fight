@@ -8,15 +8,20 @@
 #define CHECK(c) do { if (!(c)) { \
     printf("FAIL %s:%d: %s\n", __FILE__, __LINE__, #c); exit(1); } } while (0)
 
-// 每个角色每个招都有出手和有效时间;唯一例外是爷爷的太极(架势,startup = 0)
+// 每个角色每个招都有出手和有效时间;例外是爷爷的太极(架势,startup = 0)和大招(从连招里直接出,表里只用伤害,时间全 0)
 static void test_all_moves_have_timing(void) {
     for (int c = 0; c < FC_COUNT; c++) {
         const fight_char_def_t *d = fight_char(c);
         CHECK(d->hp > 0 && d->guard_ms > 0 && d->guard_long_ms > d->guard_ms);
         for (int m = 0; m < FM_COUNT; m++) {
-            if (!(c == FC_GRANDPA && m == FM_SPECIAL)) CHECK(d->mv[m].startup > 0);
-            CHECK(d->mv[m].active > 0);
-            CHECK(d->mv[m].hits >= 1);
+            const fight_move_def_t *v = &d->mv[m];
+            CHECK(v->hits >= 1);
+            if (m == FM_SUPER) {
+                CHECK(v->startup == 0 && v->active == 0 && v->recovery == 0 && v->hitstun == 0 && v->dmg > 0);
+                continue;
+            }
+            if (!(c == FC_GRANDPA && m == FM_SPECIAL)) CHECK(v->startup > 0);
+            CHECK(v->active > 0);
         }
     }
 }
