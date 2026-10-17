@@ -7,7 +7,7 @@
 
 static const fight_move_def_t *mv(const fight_fighter_t *f, uint8_t m) { return &fight_char(f->ch)->mv[m]; }
 
-static uint8_t qkey(uint8_t e) { return e & (uint8_t)~(FIGHT_Q_PREFIX | FIGHT_Q_NOSUPER); }
+static uint8_t qkey(uint8_t e) { return e & (uint8_t)~(FIGHT_Q_PREFIX | FIGHT_Q_NOSUPER | FIGHT_Q_LONG); }
 
 static bool is_jab(uint8_t m) { return m == FM_JAB || m == FM_JAB2 || m == FM_JAB3; }
 
@@ -184,9 +184,10 @@ static void super_land(fight_sim_t *s) {
     if (o->hp > 0) dizzy(s, !who, FIGHT_DIZZY_SUPER);
 }
 
-// ● / ▲ 按下时(本来的时刻 te)在不在 ▼ 前缀里:▼ 是紧挨着的上一个键、而且在 FIGHT_PREFIX_MS 内
+// ● / ▲ 按下时(本来的时刻 te)在不在 ▼ 前缀里:▼ 是紧挨着的上一个键、而且在 FIGHT_PREFIX_MS 内。
+// ▲ 还有一种:按着 ▼ 再按 ▲(设计 §4)——上一个键是 ▼、盾还举着(长按撑着的盾也算)。按着和点一下在 0.5 秒长按之前分不出来。
 static bool prefixed(const fight_fighter_t *f, uint8_t key, uint32_t te) {
-    if (key == FK_UP && f->st == FS_GUARD && f->long_guard) return true;
+    if (key == FK_UP && f->st == FS_GUARD && (f->long_guard || f->down_last)) return true;
     return f->down_last && te >= f->down_at && te - f->down_at <= FIGHT_PREFIX_MS;
 }
 
@@ -203,7 +204,9 @@ static void apply_key(fight_sim_t *s, uint8_t who, uint8_t e) {
     if (key == FK_DOWN) {
         if (f->st == FS_GUARD || f->guard_cool) return;  // 举着不重新举;冷却里丢掉
         end_chain(f);
-        enter(f, FS_GUARD, fight_char(f->ch)->guard_ms);
+        bool hold = e & FIGHT_Q_LONG;  // 排着的时候已经按成长按了
+        enter(f, FS_GUARD, hold ? fight_char(f->ch)->guard_long_ms : fight_char(f->ch)->guard_ms);
+        f->long_guard = hold;
         return;
     }
     end_chain(f);
@@ -492,10 +495,12 @@ void fight_sim_key_at(fight_sim_t *s, uint8_t who, uint8_t key, uint16_t late_ms
         if (key != FK_DOWN_LONG) mash(s, who, te);
         return;
     }
-    if (key == FK_DOWN_LONG) {  // 长按只管撑盾:盾还举着就撑到 guard_long_ms
+    if (key == FK_DOWN_LONG) {  // 长按只管撑盾:盾还举着就撑到 guard_long_ms;那个 ▼ 还排着就记在它身上,举盾时撑
         if (f->st == FS_GUARD) {
             f->dur = fight_char(f->ch)->guard_long_ms;
             f->long_guard = true;
+        } else if (f->down_last && f->qn && qkey(f->queue[f->qn - 1]) == FK_DOWN) {
+            f->queue[f->qn - 1] |= FIGHT_Q_LONG;
         }
         return;
     }

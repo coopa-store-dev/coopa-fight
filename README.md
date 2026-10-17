@@ -35,7 +35,8 @@ round). First to 2 rounds wins.
   press ahead; buttons pressed ahead come out whether the jab landed or not — if it missed, ▼ ● is just a guard and a
   jab, and you can be punished.
 - **Tap ▼ ● quickly, "da-da-da"**: ● does nothing while ▼ is held, so let go of ▼ before pressing ●. ▲ / ● within
-  0.35 s after ▼ counts as a special / super.
+  0.35 s after ▼ counts as a special / super; ▲ while that ▼'s shield is still up (holding ▼ and pressing ▲) is a
+  special too.
 - **Energy**: 3 cells. Landing, getting hit and blocking all fill it, getting hit the most; the side behind on health
   fills a bit more when hit. Energy carries over to the next round.
 - **When a super lands**: both cards play a 1.5 s close-up (the clock stops and buttons don't count), 330 damage (a

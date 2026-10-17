@@ -526,7 +526,7 @@ static void test_special_from_guard(void) {
     }
 }
 
-// ▼ 后 290 ms 按 ▲ → 小招;400 ms → 重击
+// ▼ 后 290 ms 按 ▲ → 小招;400 ms 盾还举着(按着 ▼ 再按 ▲ 也算)→ 小招;盾放下以后(700 ms)→ 重击
 static void test_special_prefix_kid(void) {
     start(FC_KID, FC_DAD, 0, 0);
     key(0, FK_DOWN);
@@ -537,7 +537,74 @@ static void test_special_prefix_kid(void) {
     key(0, FK_DOWN);
     run_to(400);
     key(0, FK_UP);
+    CHECK(S.f[0].st == FS_MOVE && S.f[0].move == FM_SPECIAL);
+    start(FC_KID, FC_DAD, 0, 0);
+    key(0, FK_DOWN);
+    run_to(700);
+    CHECK(S.f[0].st == FS_IDLE);
+    key(0, FK_UP);
     CHECK(S.f[0].move == FM_HEAVY);
+}
+
+// 按着 ▼(0.5 秒来长按)再按 ▲:四个人在盾放下之前任何时候按都是小招(没有 350–500 ms 出重击的空当);
+// 盾放下以后是重击
+static void test_special_held_down(void) {
+    for (uint8_t c = 0; c < FC_COUNT; c++) {
+        uint16_t long_ms = fight_char(c)->guard_long_ms;
+        for (uint32_t at = 10; at < long_ms; at += 40) {
+            start(c, FC_DAD, 0, 0);
+            key(0, FK_DOWN);
+            while (S.clock < at) {
+                fight_sim_step(&S);
+                if (S.clock == 500) key(0, FK_DOWN_LONG);
+            }
+            key(0, FK_UP);
+            CHECK(c == FC_GRANDPA ? S.f[0].st == FS_STANCE : S.f[0].st == FS_MOVE && S.f[0].move == FM_SPECIAL);
+        }
+        start(c, FC_DAD, 0, 0);
+        key(0, FK_DOWN);
+        run_to(500);
+        key(0, FK_DOWN_LONG);
+        run_to(long_ms);
+        CHECK(S.f[0].st == FS_IDLE);
+        key(0, FK_UP);
+        CHECK(S.f[0].st == FS_MOVE && S.f[0].move == FM_HEAVY);
+    }
+    // 上一个键不是 ▼(举着盾按了 ● 又按 ▼ 时盾已经放下):▲ 照常是重击
+    start(FC_KID, FC_DAD, 0, 0);
+    key(0, FK_DOWN);
+    run_to(100);
+    key(0, FK_OK);
+    run_to(1200);
+    key(0, FK_UP);
+    CHECK(S.f[0].move == FM_HEAVY);
+}
+
+// 被挡住僵着时按下、按着 ▼:长按在 ▼ 还排着时来,收完举盾直接撑到 guard_long_ms,那时按 ▲ 是小招
+static void test_long_down_queued(void) {
+    start(FC_KID, FC_DAD, 0, 0);
+    key(1, FK_DOWN);
+    key(0, FK_OK);          // 180 打到盾上,库巴被挡僵到 1030
+    run_to(250);
+    CHECK(S.f[0].st == FS_BLOCKSTUN);
+    key(0, FK_DOWN);        // 排着
+    run_to(750);
+    key(0, FK_DOWN_LONG);   // 还在僵着、▼ 还排着
+    CHECK(S.f[0].st == FS_BLOCKSTUN && S.f[0].qn == 1);
+    run_to(1040);
+    CHECK(S.f[0].st == FS_GUARD && S.f[0].long_guard && S.f[0].dur == fight_char(FC_KID)->guard_long_ms);
+    run_to(1700);
+    CHECK(S.f[0].st == FS_GUARD);
+    key(0, FK_UP);
+    CHECK(S.f[0].st == FS_MOVE && S.f[0].move == FM_SPECIAL);
+    // 对照:没长按,盾只举 guard_ms
+    start(FC_KID, FC_DAD, 0, 0);
+    key(1, FK_DOWN);
+    key(0, FK_OK);
+    run_to(250);
+    key(0, FK_DOWN);
+    run_to(1040);
+    CHECK(S.f[0].st == FS_GUARD && !S.f[0].long_guard && S.f[0].dur == fight_char(FC_KID)->guard_ms);
 }
 
 // ▼ 长按撑盾时按 ▲ → 小招
@@ -743,6 +810,8 @@ int main(void) {
     test_trade_no_super();
     test_special_from_guard();
     test_special_prefix_kid();
+    test_special_held_down();
+    test_long_down_queued();
     test_special_long_guard();
     test_special_cool();
     test_stance_whiff();

@@ -34,8 +34,9 @@
 #define FIGHT_EVQ 16
 #define FIGHT_UNDECIDED 2     // winner:还没分出
 #define FIGHT_DRAW 3          // winner:平
-#define FIGHT_Q_PREFIX 0x80   // queue 里的 ● / ▲:紧跟在 ▼ 后面、FIGHT_PREFIX_MS 内按的(或 ▼ 长按撑着盾时按的 ▲)
+#define FIGHT_Q_PREFIX 0x80   // queue 里的 ● / ▲:紧跟在 ▼ 后面、FIGHT_PREFIX_MS 内按的(或这个 ▼ 举起的盾还在时按的 ▲)
 #define FIGHT_Q_NOSUPER 0x40  // queue 里的 ● / ▲:按的时候(按本来的时刻)对方在保护里:▼ ● 只出拳,拿它起手的这一套不能有大招
+#define FIGHT_Q_LONG 0x20     // queue 里的 ▼:排着的时候已经按成了长按,举盾时直接撑到 guard_long_ms
 #define FIGHT_SUPER_FREEZE 1500
 #define FIGHT_DIZZY_SUPER 2000
 #define FIGHT_DIZZY_BREAK 1000
@@ -71,7 +72,7 @@ typedef struct {
     uint32_t protect_end; // 最近一次保护消失的 clock(0 = 这回合还没有过):晚到的起手按本来的时刻和它比
     uint16_t special_cool; // 小招冷却(小招出完才开始减)
     uint16_t eat_keys;   // 刚醒:还剩多久不收键、也不挨打
-    uint8_t queue[4];    // 提前按的键(出招还没打到时按的):fight_key_t,● / ▲ 可能带 FIGHT_Q_PREFIX、FIGHT_Q_NOSUPER
+    uint8_t queue[4];    // 提前按的键(出招还没打到时按的):fight_key_t,● / ▲ 可能带 FIGHT_Q_PREFIX、FIGHT_Q_NOSUPER,▼ 可能带 FIGHT_Q_LONG
     uint8_t qn;
     uint16_t guard_cool;
     uint16_t mash_left;  // 晕:还剩多久(狂按减)
