@@ -25,7 +25,7 @@
 //   'K' 序号 然后 1..7 对(键 fight_key_t、距上一键几个 10 ms,封顶 255)  被连方 → 主动方
 //   'M' 这次晕已经狂按了几下(封顶 255)                                被连方 → 主动方(晕着时代替 K)
 //   'F' 快照(下面)                                                   主动方 → 被连方
-//   'E' 回合 种类(FE_SUPER / FE_KO / FE_TIMEUP) who move 角色         主动方 → 被连方:不能丢的事件
+//   'E' 回合 种类(FE_SUPER / FE_GUARD_BREAK / FE_KO / FE_TIMEUP) who move 角色  主动方 → 被连方:不能丢的事件
 //   'Q' 编号 / 'A' 编号                                              主动方 ping、被连方回应(开打时不发)
 //
 // 快照 'F' 正好 16 字节:[0] 'F' [1] ack = 主动方收到的最后一条 'K' 的序号 [2..3] 回合计时 / 10 ms
@@ -41,9 +41,8 @@
 //   (下面「往前挪」以后排的时刻都不会晚于到达,实际上都是马上喂。)
 //   被连方最多 FIGHT_K_INFLIGHT 条 K 还没被快照的 ack 确认,再按的键排着,合并进下一条。
 // - 主动方自己的键延后 delay 再喂 f[0]:delay = 平滑来回的一半(新的一次占 1/4),限制在 30–150 ms,
-//   还没量到时 FIGHT_LOCAL_DELAY。'Q' 在选人、倒数、打完时、链路静了 FIGHT_PING_QUIET 以后每 FIGHT_PING_MS 一次;
-//   开打时不 ping,因为 'Q' / 'A' 各占链路一片,会把快照和被连方的键挤后一个来回;回合之间也不 ping,
-//   免得下一回合的 'N' 排在 'Q' 后面晚一个来回到。
+//   还没量到时 FIGHT_LOCAL_DELAY。'Q' 在开打以外(选人、倒数、回合之间、打完)、链路静了 FIGHT_PING_QUIET 以后
+//   每 FIGHT_PING_MS 一次;开打时不 ping,因为 'Q' / 'A' 各占链路一片,会把快照和被连方的键挤后一个来回。
 // - 链路是停等的:一片的确认回来才发下一片,交出去太快就全排在链路里(快照越积越旧)。主动方每交出去一条,
 //   就估计链路要忙一片的时间(量到的平滑来回 × 9/8);快照和 'Q' 只在估计空下来时交出去(快照有事件尽快,
 //   没事件约每 FIGHT_SNAP_MS),快照交出去的时候现打包,所以排着的旧快照不会堆在链路里。
@@ -139,6 +138,7 @@ typedef struct {
     bool predict; uint8_t predict_left, predict_seq;    // 被连方:自己先画的招还没被快照算到(在 kq 第几个 / 哪条 'K')
     fight_snap_t snap; bool snap_ok;                    // 被连方:这一回合最近收到的快照(原样)
     uint8_t ahead;                                      // 被连方:快照往前推几 ms('N' 带来的)
+    uint8_t broke;                                      // 被连方:'E' 说盾被砸开了、掉血还没在快照里看到的人(位 = sim 下标)
     struct { uint8_t st, move; uint32_t at; } gone[2];  // 被连方:这边结束掉的最近一下出招 / 被挡僵直 / 晕 / 特写(开始时刻,now)
 
     struct { uint8_t gev; fight_ev_t ev; } evq[FIGHT_GEVQ];

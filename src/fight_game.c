@@ -149,10 +149,10 @@ static void pump(fight_game_t *g) {
         return;
     }
     if (g->now < g->link_free) return;  // 快照只在估计链路空下来时交出去
-    // 'Q':开打时不发('Q' 和回的 'A' 各占一片,会把快照和被连方的键挤后一个来回);回合之间也不发(下一回合的 'N'
-    // 会排在它后面晚一个来回,两边开打对不齐);别的时候等链路静下来
-    // FIGHT_PING_QUIET 再发,量到的来回才不带排队(估计偏小时「估计空了」并不可靠)
-    if (g->phase != GP_PLAY && g->phase != GP_END && !g->bad_ver && !g->ping_wait && g->now >= g->ping_next &&
+    // 'Q':开打时不发('Q' 和回的 'A' 各占一片,会把快照和被连方的键挤后一个来回);别的时候等链路静下来
+    // FIGHT_PING_QUIET 再发,量到的来回才不带排队(估计偏小时「估计空了」并不可靠)。回合之间也量(下一回合的 ahead
+    // 早一回合跟上);'N' 排在路上的 'Q' 后面没关系,start_round 把链路还忙着的那段算进去了
+    if (g->phase != GP_PLAY && !g->bad_ver && !g->ping_wait && g->now >= g->ping_next &&
         g->now - g->hand_at >= FIGHT_PING_QUIET) {
         uint8_t m[2] = { 'Q', (uint8_t)(g->ping_id + 1) };
         if (!hand(g, m, sizeof m)) return;
@@ -203,6 +203,7 @@ static void clear_keys(fight_game_t *g) {
     g->predict_left = 0;
     g->acked = g->tx_seq;
     g->down_last = false;
+    g->broke = 0;
     memset(g->gone, 0, sizeof g->gone);
 }
 
@@ -323,7 +324,7 @@ static void sim_events(fight_game_t *g) {
     fight_ev_t e;
     while (fight_sim_event(&g->sim, &e)) {
         g->snap_due = true;
-        if (e.kind == FE_SUPER || e.kind == FE_KO || e.kind == FE_TIMEUP) {
+        if (e.kind == FE_SUPER || e.kind == FE_KO || e.kind == FE_TIMEUP || e.kind == FE_GUARD_BREAK) {
             uint8_t m[6] = { 'E', g->round, e.kind, e.who, e.move, e.who < 2 ? g->sim.f[e.who].ch : 0 };
             enqueue(g, m, sizeof m);
         }
@@ -424,9 +425,9 @@ static void send_mash(fight_game_t *g) {
     g->mash_cool = FIGHT_MASH_MSG_MS;
 }
 
-// 快照前后比一比,给画面出事件(出招、打中、砸开防御、太极接住、挡住的特效、晕、醒);大招、KO、时间到由 'E' 出。
+// 快照前后比一比,给画面出事件(出招、打中、太极接住、挡住的特效、晕、醒);大招、砸开防御、KO、时间到由 'E' 出。
 // 爷爷的太极:摆架势算出招(FE_START 小招),架势收招(FS_STANCE → FS_MOVE 小招)不算;
-// 架势里的爷爷不再摆了、对方掉了血 = 接住(FE_COUNTER);举着盾掉血、打的那招砸得开盾 = 砸开防御。
+// 架势里的爷爷不再摆了、对方掉了血 = 接住(FE_COUNTER)。'E' 说了砸开防御的那一下掉血不再算打中。
 static void diff_events(fight_game_t *g, const fight_fighter_t *old) {
     for (uint8_t i = 0; i < 2; i++) {
         const fight_fighter_t *o = &old[i], *f = &g->sim.f[i], *po = &old[!i], *p = &g->sim.f[!i];
@@ -437,7 +438,7 @@ static void diff_events(fight_game_t *g, const fight_fighter_t *old) {
         if (f->hp < o->hp) {
             bool countered = po->st == FS_STANCE && p->st != FS_STANCE && !(p->st == FS_MOVE && p->move == FM_SPECIAL);
             if (countered) sim_gev(g, FE_COUNTER, !i, FM_SPECIAL);
-            else if (o->st == FS_GUARD && fight_char(p->ch)->mv[p->move].breaks_guard) sim_gev(g, FE_GUARD_BREAK, !i, p->move);
+            else if (g->broke & 1u << i) g->broke &= (uint8_t)~(1u << i);
             else sim_gev(g, FE_HIT, !i, p->move);
         }
         if (f->st == FS_BLOCKSTUN && o->st != FS_BLOCKSTUN) sim_gev(g, FE_BLOCK, i, f->move);
@@ -538,7 +539,8 @@ static void on_snap(fight_game_t *g, const uint8_t *m, size_t n) {
 static void on_event(fight_game_t *g, const uint8_t *m, size_t n) {
     if (g->initiator || n < 6 || m[1] != g->round) return;
     uint8_t kind = m[2], who = m[3], move = m[4];
-    bool ok = kind == FE_TIMEUP ? who <= 1 || who == FIGHT_DRAW : (kind == FE_SUPER || kind == FE_KO) && who <= 1;
+    bool ok = kind == FE_TIMEUP ? who <= 1 || who == FIGHT_DRAW
+                                : (kind == FE_SUPER || kind == FE_KO || kind == FE_GUARD_BREAK) && who <= 1;
     if (!ok || move >= FM_COUNT || !playing(g)) return;
     fight_sim_t *s = &g->sim;
     if (kind == FE_SUPER) {  // 特写:两边定住(晚到了约一个单程,冻结少等 ahead),冻结完这边就接着画
@@ -548,6 +550,8 @@ static void on_event(fight_game_t *g, const uint8_t *m, size_t n) {
         for (int i = 0; i < 2; i++) s->f[i].t = 0;
         s->freeze = (uint16_t)(FIGHT_SUPER_FREEZE - g->ahead);
         if (who == g->me) g->predict = false;
+    } else if (kind == FE_GUARD_BREAK) {  // 主动方那边真的砸开了盾(这边画的盾可能是自己先画的):掉血等快照
+        g->broke |= (uint8_t)(1u << !who);
     } else if (kind == FE_KO) {
         s->f[who].st = FS_KO;
         s->f[who].hp = 0;

@@ -670,6 +670,18 @@ static void test_passive_feedback(void) {
         CHECK(evs(0, FE_GUARD_BREAK, me) == 1 && evs(1, FE_GUARD_BREAK, me) == 1);
         CHECK(evs(0, FE_HIT, me) == 0 && evs(1, FE_HIT, me) == 0);
     }
+    // 被连方按了 ▼(自己卡上先画了盾),但 ▼ 到主动方时重击已经打中了:主动方是普通打中,被连方卡上也不能是「破防！」
+    test_seed(77);
+    begin_as(FC_DAD, FC_KID, 70, 0);
+    run(2500);
+    clear_events();
+    press(0, FK_UP);    // 70 ms 后生效,再 550 ms 打到(按下后 620 ms)
+    run_count(590);
+    press(1, FK_DOWN);  // 70 ms 后才到主动方(按下后 660 ms),这边先画成举盾
+    CHECK(D.b.sim.f[1].st == FS_GUARD);
+    run_count(1000);
+    CHECK(evs(0, FE_HIT, 0) == 1 && evs(0, FE_GUARD_BREAK, 0) == 0);
+    CHECK(evs(1, FE_HIT, 0) == 1 && evs(1, FE_GUARD_BREAK, 0) == 0);
 }
 
 // ---- 两边一起开打 ----
@@ -679,7 +691,6 @@ static int32_t fight_gap(void) {
     uint32_t at[2] = { 0, 0 };
     for (int t = 0; !at[0] || !at[1]; t += 10) {
         CHECK(t < FIGHT_NEXT_MS + FIGHT_COUNT_MS + 2000);
-        CHECK(!(D.a.phase == GP_END && D.a.ping_wait));   // 回合之间不 ping
         duo_step();
         for (int c = 0; c < 2; c++) {
             uint8_t e;
