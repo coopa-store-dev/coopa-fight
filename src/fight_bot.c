@@ -278,6 +278,7 @@ static void count_super(fight_bot_t *b, const fight_seen_t *s, uint32_t dt) {
     brain_t *m = brain(b);
     bool rise = s->chain_open && !m->chain_prev;
     m->chain_prev = s->chain_open;
+    if (rise && s->st[1] == FS_HITSTUN && s->left[1] + 2 * FIGHT_STEP >= FIGHT_PARRY_STUN) rise = false;  // 弹开开的窗口不算 ● 打中
     if (!m->plan_super) return;
     if (rise && !m->super_hit && m->plan_i >= 1 && m->plan_i < m->plan_n) {
         m->super_hit = true;

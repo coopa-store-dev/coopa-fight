@@ -273,7 +273,7 @@ int main(int argc, char **argv) {
 
     // 3. ● ▼ ● 在 ● 打中的前提下出了大招
     double sa = pc(ad_ok, ad_try), sk = pc(kid_ok, kid_try);
-    bool ga = expect(sa >= 75, "大人 ●▼● 成功率 ≥ 75%(打中的那一拳可能被弹开)"), gk = expect(sk >= 40, "小孩 ●▼● 成功率 ≥ 40%");
+    bool ga = expect(sa >= 85, "大人 ●▼● 成功率 ≥ 85%"), gk = expect(sk >= 55, "小孩 ●▼● 成功率 ≥ 55%");
     printf("== ●▼● 打中后出了大招:大人 %.0f%%%s(%u 次)、小孩 %.0f%%%s(%u 次)==\n", sa, mark(ga), ad_try, sk, mark(gk),
            kid_try);
 

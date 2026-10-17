@@ -335,6 +335,7 @@ static void parry(fight_sim_t *s, uint8_t who, uint8_t m) {
     add_gauge(s, who, FIGHT_GAUGE_PARRY);
     stun(a, FIGHT_PARRY_STUN);
     a->hit2_left = 0;
+    g->hit2_left = 0;  // 自己飞着的锅盖也不回来了(回来那一下会把对方的僵直改短,连招窗口却还开着)
     enter(g, FS_IDLE, 0);
     g->guard_cool = 0;
     g->chain_nosuper = a->protect;
@@ -534,9 +535,12 @@ void fight_sim_key_at(fight_sim_t *s, uint8_t who, uint8_t key, uint16_t late_ms
     }
     f->down_last = key == FK_DOWN;
     if (f->st == FS_HITSTUN) return;  // 挨打僵着按的不算
+    bool guard = f->st == FS_GUARD;
     push(f, e);  // 出招中 / 收招中 / 被挡僵着:排着;能动时马上出
     if (chain_ok(f, te)) drain_chain(s, who);
     else drain_idle(s, who);
+    // 晚到的 ▼ 马上举起了盾:盾按本来按下的时刻算举了多久(弹开看的是这个)
+    if (key == FK_DOWN && !guard && f->st == FS_GUARD && f->t == 0) f->t = late_ms;
 }
 
 void fight_sim_step(fight_sim_t *s) {

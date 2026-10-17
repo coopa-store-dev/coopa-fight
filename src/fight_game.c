@@ -426,7 +426,8 @@ static void send_mash(fight_game_t *g) {
 }
 
 // 快照前后比一比,给画面出事件(出招、打中、太极接住、挡住的特效、弹开、晕、醒);大招、砸开防御、KO、时间到由 'E' 出。
-// 弹开:打的人僵住了、两边都没掉血、对方的气一下涨了 FIGHT_GAUGE_PARRY 以上(别的事一次涨不了这么多;气满了就认不出,只少个声音)。
+// 弹开:打的人僵住了、两边都没掉血、对方的气一下涨了 FIGHT_GAUGE_PARRY 以上(别的事一次涨不了这么多);对方气满了就看他刚才是不是举着盾。
+// 弹开后一个快照间隔里就反打的认不出(只少个声音)。
 // 爷爷的太极:摆架势算出招(FE_START 小招),架势收招(FS_STANCE → FS_MOVE 小招)不算;
 // 架势里的爷爷不再摆了、对方掉了血 = 接住(FE_COUNTER)。'E' 说了砸开防御的那一下掉血不再算打中。
 static void diff_events(fight_game_t *g, const fight_fighter_t *old) {
@@ -444,7 +445,7 @@ static void diff_events(fight_game_t *g, const fight_fighter_t *old) {
         }
         if (f->st == FS_BLOCKSTUN && o->st != FS_BLOCKSTUN) sim_gev(g, FE_BLOCK, i, f->move);
         if (f->st == FS_HITSTUN && o->st != FS_HITSTUN && f->hp == o->hp && p->hp == po->hp &&
-            p->gauge >= po->gauge + FIGHT_GAUGE_PARRY)
+            (p->gauge >= po->gauge + FIGHT_GAUGE_PARRY || (p->gauge == FIGHT_GAUGE_MAX && po->st == FS_GUARD)))
             sim_gev(g, FE_PARRY, !i, o->move);
         if (f->st == FS_DIZZY && o->st != FS_DIZZY) sim_gev(g, FE_DIZZY, i, 0);
         if (o->st == FS_DIZZY && f->st != FS_DIZZY) sim_gev(g, FE_WAKE, i, 0);

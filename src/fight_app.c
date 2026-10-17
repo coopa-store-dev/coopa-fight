@@ -128,6 +128,13 @@ static void shout(const kit_line_t *line, sfx_id_t prefix) {
     if (!s_quiet) voice(line, prefix);
 }
 
+// 短的一声(抡重击、「开打!」):只在它自己那段时间不放「啪」,不多留 200 ms(重击 0.55 秒就打到,打到时要响)
+static void grunt(const kit_line_t *line, sfx_id_t prefix) {
+    if (s_quiet) return;
+    sfx_play_line(line, prefix, false);
+    s_quiet = line->samples / 16;
+}
+
 // 挨了重的:重击、连段重击、第三拳、小招
 static bool heavy_hit(uint8_t m) { return m == FM_HEAVY || m == FM_HEAVY_LINK || m == FM_JAB3 || m == FM_SPECIAL; }
 
@@ -248,7 +255,7 @@ static void on_sim(const fight_ev_t *e) {
                 say(SPECIAL[char_of(e->who)], UK_BLUE);
                 voice(&fight_lines_special[char_of(e->who)], SFX_NONE);
             } else if (e->move == FM_HEAVY) {
-                shout(&fight_lines_heavy[char_of(e->who)], SFX_NONE);  // 抡起来喊一声,打到之前喊完
+                grunt(&fight_lines_heavy[char_of(e->who)], SFX_NONE);  // 抡起来喊一声,打到之前喊完
             } else {
                 sfx_play(SFX_WHOOSH);  // 拳「嗖」:次要音效,说话时外壳自己跳过
             }
@@ -316,7 +323,7 @@ static void on_event(uint8_t ev, const fight_ev_t *se) {
         }
         case GE_FIGHT:
             s_fight_ms = FIGHT_SHOW_MS;
-            voice(&fight_lines_call[FCALL_FIGHT], SFX_START);
+            grunt(&fight_lines_call[FCALL_FIGHT], SFX_START);
             break;
         case GE_SIM: on_sim(se); break;
         case GE_ROUND_END:

@@ -112,6 +112,26 @@ static void test_parry_heavy_then_super(void) {
     CHECK(S.f[1].st == FS_SUPER_OUT && ev_by(FE_SUPER, 1) == 1);
 }
 
+// 晚到的 ▼(联机补算)按本来按下的时刻算盾举了多久:本来举了 FIGHT_PARRY_MS 以上就只是挡住
+static void test_parry_late_down(void) {
+    start(FC_GRANNY, FC_KID, 0, 0);
+    run_to(100);
+    key(0, FK_OK);   // 300 打到
+    run_to(250);
+    fight_sim_key_at(&S, 1, FK_DOWN, 150);   // 本来 100 就按了:打到时盾举了 200,只是挡住
+    CHECK(S.f[1].st == FS_GUARD && S.f[1].t == 150);
+    run_to(300);
+    CHECK(ev(FE_PARRY) == 0 && ev_by(FE_BLOCK, 0) == 1);
+    // 对照:同一时刻不晚到的 ▼ 是弹开
+    start(FC_GRANNY, FC_KID, 0, 0);
+    run_to(100);
+    key(0, FK_OK);
+    run_to(250);
+    key(1, FK_DOWN);
+    run_to(300);
+    CHECK(ev_by(FE_PARRY, 1) == 1);
+}
+
 // 奶奶锅盖的第二下不算弹开(照常挡住 / 打中)
 static void test_parry_not_second_hit(void) {
     start(FC_GRANNY, FC_KID, 0, 0);
@@ -657,6 +677,7 @@ int main(void) {
     test_parry_window_edge();
     test_parry_heavy_then_super();
     test_parry_not_second_hit();
+    test_parry_late_down();
     test_heavy_breaks_guard();
     test_jab_interrupts_heavy_early();
     test_heavy_armor_late();
